@@ -1,646 +1,732 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Trip Planner</title>
-  <style>
-    /* ── Reset & base ─────────────────────────────────────────── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #f0f4f8;
-      color: #1a202c;
-      min-height: 100vh;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Our Trips</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F3EC; --paper-raised:#FFFFFF; --ink:#1C2B39; --ink-soft:#4B5B68; --line:#DDD6C7;
+    --red:#C1362B; --harbor:#2C6E82; --harbor-soft:#E4EEF0; --mustard:#C0913A; --mustard-soft:#F4EBD9;
+    --moss:#5E7A57; --moss-soft:#E9EFE4; --gold:#B8933C;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:'Inter',sans-serif; font-size:15.5px; line-height:1.55; padding-bottom:100px;}
+  h1,h2,h3,h4{font-family:'Fraunces',serif; font-weight:600; margin:0 0 .3em;}
+  a{color:var(--harbor);}
+  .mono{font-family:'JetBrains Mono',monospace; font-size:.85em;}
+  input,textarea,select,button{font-family:'Inter',sans-serif;}
 
-    /* ── Auth screen ──────────────────────────────────────────── */
-    #auth-screen {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      gap: 1.5rem;
-      padding: 2rem;
-    }
-    #auth-screen h1 { font-size: 2.2rem; color: #2d3748; }
-    #auth-screen p  { color: #718096; font-size: 1.05rem; }
-    #login-btn {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      background: #fff;
-      border: 1px solid #cbd5e0;
-      border-radius: 8px;
-      padding: 0.7rem 1.4rem;
-      font-size: 1rem;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0,0,0,.08);
-      transition: box-shadow .15s;
-    }
-    #login-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,.14); }
-    #login-btn img { width: 20px; height: 20px; }
+  /* Auth screen */
+  #auth-screen{min-height:100vh; display:flex; align-items:center; justify-content:center; background:#1C2B39;}
+  .auth-box{background:var(--paper-raised); border-radius:16px; padding:40px 36px; width:340px; max-width:90vw;}
+  .auth-box h1{font-size:1.6rem; margin-bottom:4px;}
+  .auth-box p{color:var(--ink-soft); font-size:.88rem; margin-bottom:24px;}
+  .auth-box input{width:100%; padding:10px 12px; margin-bottom:12px; border:1px solid var(--line); border-radius:8px; font-size:.95rem;}
+  .auth-box button{width:100%; padding:11px; background:var(--ink); color:var(--paper); border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:.92rem;}
+  .auth-box button:hover{background:#2C4054;}
+  #auth-google{background:#fff !important; color:var(--ink) !important; border:1px solid var(--line) !important;}
+  #auth-google:hover{background:#F6F3EC !important;}
+  #auth-error{color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;}
 
-    /* ── App shell ────────────────────────────────────────────── */
-    #app-shell { display: none; min-height: 100vh; flex-direction: column; }
+  header.hero{background:linear-gradient(180deg,#1C2B39,#24384A); color:#F2EFE6; padding:28px 24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px;}
+  header.hero .left h1{font-size:1.5rem; color:#FBF9F3; margin:0;}
+  header.hero .left p{color:#9FB0B8; font-size:.8rem; margin:2px 0 0;}
+  header.hero .right{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  select#trip-select, header.hero button{
+    font-family:'Inter',sans-serif; font-size:.82rem; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.08); color:#F2EFE6; cursor:pointer;
+  }
+  header.hero button.primary{background:#F2EFE6; color:var(--ink); border-color:transparent;}
 
-    /* ── Header ───────────────────────────────────────────────── */
-    header {
-      background: #2b6cb0;
-      color: #fff;
-      padding: 0 1.5rem;
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      box-shadow: 0 2px 8px rgba(0,0,0,.2);
-    }
-    header h1 { font-size: 1.3rem; letter-spacing: .5px; }
-    #user-area { display: flex; align-items: center; gap: .8rem; }
-    #user-avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #90cdf4; }
-    #user-name { font-size: .9rem; opacity: .9; }
-    #logout-btn {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,.5);
-      color: #fff;
-      border-radius: 6px;
-      padding: .3rem .7rem;
-      font-size: .85rem;
-      cursor: pointer;
-      transition: background .15s;
-    }
-    #logout-btn:hover { background: rgba(255,255,255,.15); }
+  nav.tabs{position:sticky; top:0; z-index:50; background:rgba(246,243,236,.96); backdrop-filter:blur(6px); border-bottom:1px solid var(--line); overflow-x:auto; white-space:nowrap; display:flex; gap:4px; padding:10px 16px;}
+  nav.tabs button{font-weight:600; font-size:.82rem; background:transparent; border:1px solid transparent; color:var(--ink-soft); padding:8px 14px; border-radius:20px; cursor:pointer;}
+  nav.tabs button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
 
-    /* ── Main content ─────────────────────────────────────────── */
-    main { flex: 1; padding: 1.5rem; max-width: 900px; width: 100%; margin: 0 auto; }
+  main{max-width:980px; margin:0 auto; padding:36px 20px;}
+  section.panel{display:none;} section.panel.active{display:block;}
+  .card{background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin-bottom:16px;}
+  .card h3{font-size:1.1rem;}
+  table{width:100%; border-collapse:collapse; font-size:.92rem;}
+  th,td{text-align:left; padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top;}
+  th{font-family:'JetBrains Mono',monospace; font-size:.68rem; text-transform:uppercase; color:var(--ink-soft);}
+  .badge{display:inline-block; font-size:.68rem; font-weight:600; padding:2px 8px; border-radius:20px;}
+  .b-green{background:var(--moss-soft); color:var(--moss);} .b-yellow{background:var(--mustard-soft); color:#8a6a1f;} .b-red{background:#F6E3DF; color:var(--red);}
+  .stars{color:var(--gold); font-size:.9rem;}
+  .place-row{padding:14px 0; border-bottom:1px solid var(--line);} .place-row:last-child{border-bottom:none;}
+  .place-name{font-weight:600;} .place-meta{color:var(--ink-soft); font-size:.85rem; margin-top:2px;}
+  .stop{border-left:2px dashed var(--line); padding:0 0 20px 18px; margin-left:6px; position:relative;}
+  .stop::before{content:""; position:absolute; left:-7px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--harbor); border:2px solid var(--harbor-soft);}
+  .stop-time{font-family:'JetBrains Mono',monospace; font-size:.72rem; color:var(--harbor); text-transform:uppercase;}
+  .stop h4{font-size:1.02rem; margin:2px 0 4px;}
+  .stop-desc{font-size:.9rem; color:var(--ink-soft);}
+  .stop-alt{font-size:.82rem; background:#F6E3DF; border-radius:8px; padding:7px 11px; margin-top:6px; color:#8a3a30;}
+  .daynav{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;}
+  .daynav button{font-family:'JetBrains Mono',monospace; font-size:.75rem; background:var(--paper-raised); border:1px solid var(--line); color:var(--ink-soft); padding:7px 12px; border-radius:8px; cursor:pointer;}
+  .daynav button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
+  .day-block{display:none;} .day-block.active{display:block;}
 
-    /* ── Toolbar ──────────────────────────────────────────────── */
-    .toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1.2rem;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-    .toolbar h2 { font-size: 1.3rem; color: #2d3748; }
-    .btn-primary {
-      background: #2b6cb0;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: .55rem 1.1rem;
-      font-size: .95rem;
-      cursor: pointer;
-      transition: background .15s;
-    }
-    .btn-primary:hover { background: #2c5282; }
+  .edit-row{margin-top:10px; border-top:1px dashed var(--line); padding-top:8px;}
+  .edit-check{display:flex; align-items:center; gap:6px; font-size:.78rem; font-weight:600; color:var(--harbor); cursor:pointer; margin-bottom:6px;}
+  .edit-check input{width:15px; height:15px; accent-color:var(--harbor); cursor:pointer;}
+  .js-note{width:100%; min-height:34px; resize:vertical; font-size:.82rem; background:#FBFAF6; border:1px solid var(--line); border-radius:8px; padding:6px 9px;}
+  a.maplink{font-size:.78rem; margin-right:12px;}
+  .empty-state{text-align:center; padding:60px 20px; color:var(--ink-soft);}
+  .empty-state button{margin-top:16px;}
+  textarea.jsonbox{width:100%; min-height:220px; font-family:'JetBrains Mono',monospace; font-size:.78rem; border:1px solid var(--line); border-radius:8px; padding:12px;}
+  #sync-toolbar{position:fixed; bottom:0; left:0; right:0; z-index:60; background:var(--ink); color:#EDE8DA; padding:10px 18px; display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; font-size:.78rem;}
+  #sync-toolbar span{color:#9FB0B8;}
+  .hidden{display:none !important;}
 
-    /* ── Trip cards grid ──────────────────────────────────────── */
-    #trips-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1.1rem;
-    }
-    .trip-card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.07);
-      overflow: hidden;
-      cursor: pointer;
-      transition: transform .15s, box-shadow .15s;
-    }
-    .trip-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(0,0,0,.12); }
-    .trip-card-banner {
-      height: 8px;
-      background: linear-gradient(90deg, #4299e1, #9f7aea);
-    }
-    .trip-card-body { padding: 1rem 1.1rem; }
-    .trip-card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: .3rem; color: #2d3748; }
-    .trip-card-dates { font-size: .82rem; color: #718096; margin-bottom: .5rem; }
-    .trip-card-note {
-      font-size: .87rem;
-      color: #4a5568;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .trip-card-footer {
-      padding: .6rem 1.1rem;
-      border-top: 1px solid #e2e8f0;
-      display: flex;
-      justify-content: flex-end;
-      gap: .5rem;
-    }
-    .btn-sm {
-      border: none;
-      border-radius: 6px;
-      padding: .3rem .7rem;
-      font-size: .82rem;
-      cursor: pointer;
-    }
-    .btn-edit  { background: #ebf8ff; color: #2b6cb0; }
-    .btn-edit:hover  { background: #bee3f8; }
-    .btn-delete { background: #fff5f5; color: #c53030; }
-    .btn-delete:hover { background: #fed7d7; }
-
-    /* ── Empty state ──────────────────────────────────────────── */
-    #empty-state {
-      text-align: center;
-      padding: 4rem 1rem;
-      color: #a0aec0;
-    }
-    #empty-state svg { opacity: .4; margin-bottom: 1rem; }
-    #empty-state p { font-size: 1.05rem; }
-
-    /* ── Modal overlay ────────────────────────────────────────── */
-    .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.45);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 200;
-      padding: 1rem;
-    }
-    .modal {
-      background: #fff;
-      border-radius: 14px;
-      width: 100%;
-      max-width: 480px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.25);
-      overflow: hidden;
-    }
-    .modal-header {
-      background: #2b6cb0;
-      color: #fff;
-      padding: 1rem 1.3rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .modal-header h3 { font-size: 1.1rem; }
-    .modal-close {
-      background: transparent;
-      border: none;
-      color: #fff;
-      font-size: 1.4rem;
-      cursor: pointer;
-      line-height: 1;
-    }
-    .modal-body { padding: 1.3rem; display: flex; flex-direction: column; gap: .9rem; }
-    .form-group { display: flex; flex-direction: column; gap: .3rem; }
-    .form-group label { font-size: .88rem; font-weight: 600; color: #4a5568; }
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-      border: 1px solid #cbd5e0;
-      border-radius: 8px;
-      padding: .55rem .75rem;
-      font-size: .95rem;
-      font-family: inherit;
-      outline: none;
-      transition: border-color .15s;
-    }
-    .form-group input:focus,
-    .form-group textarea:focus,
-    .form-group select:focus { border-color: #4299e1; }
-    .form-group textarea { resize: vertical; min-height: 80px; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
-    .modal-footer {
-      padding: .9rem 1.3rem;
-      border-top: 1px solid #e2e8f0;
-      display: flex;
-      justify-content: flex-end;
-      gap: .6rem;
-    }
-    .btn-cancel {
-      background: #edf2f7;
-      border: none;
-      border-radius: 8px;
-      padding: .55rem 1.1rem;
-      font-size: .95rem;
-      cursor: pointer;
-    }
-    .btn-cancel:hover { background: #e2e8f0; }
-
-    /* ── Toast ────────────────────────────────────────────────── */
-    #toast {
-      position: fixed;
-      bottom: 1.5rem; right: 1.5rem;
-      background: #2d3748;
-      color: #fff;
-      border-radius: 8px;
-      padding: .7rem 1.2rem;
-      font-size: .9rem;
-      box-shadow: 0 4px 14px rgba(0,0,0,.25);
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity .25s, transform .25s;
-      pointer-events: none;
-      z-index: 300;
-    }
-    #toast.show { opacity: 1; transform: translateY(0); }
-
-    /* ── Loading spinner ──────────────────────────────────────── */
-    #loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      font-size: 1.1rem;
-      color: #718096;
-      gap: .6rem;
-    }
-    .spinner {
-      width: 22px; height: 22px;
-      border: 3px solid #e2e8f0;
-      border-top-color: #4299e1;
-      border-radius: 50%;
-      animation: spin .6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Responsive ───────────────────────────────────────────── */
-    @media (max-width: 480px) {
-      .form-row { grid-template-columns: 1fr; }
-      #user-name { display: none; }
-    }
-  </style>
+  /* Documents */
+  .doc-form{display:flex; flex-direction:column; gap:8px; margin-top:10px;}
+  .doc-form input, .doc-form select, .doc-form textarea{padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.88rem;}
+  .doc-card{display:flex; justify-content:space-between; gap:14px; align-items:flex-start;}
+  .doc-card .doc-type{font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--harbor); background:var(--harbor-soft); padding:2px 8px; border-radius:20px; display:inline-block; margin-bottom:6px;}
+  .doc-card .doc-actions{display:flex; gap:8px; flex-shrink:0;}
+  .doc-card .doc-actions button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
+  .doc-chip{display:inline-flex; align-items:center; gap:6px; background:var(--mustard-soft); color:#8a6a1f; font-size:.76rem; font-weight:600; padding:4px 6px 4px 10px; border-radius:20px; margin:0 6px 6px 0;}
+  .doc-chip button{background:none; border:none; cursor:pointer; color:#8a6a1f; font-weight:700; padding:0 2px; font-size:.9rem; line-height:1;}
+  .link-doc-row{display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;}
+  .link-doc-row select{flex:1; min-width:140px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:.8rem;}
+  .link-doc-row button{font-size:.76rem; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
+</style>
 </head>
 <body>
 
-  <!-- Loading indicator shown while Firebase initialises -->
-  <div id="loading">
-    <div class="spinner"></div>
-    <span>Loading…</span>
-  </div>
-
-  <!-- Auth screen (shown when signed out) -->
-  <div id="auth-screen" style="display:none">
-    <h1>✈️ Trip Planner</h1>
-    <p>Sign in to plan and manage your trips</p>
-    <button id="login-btn">
-      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
-      Sign in with Google
-    </button>
-  </div>
-
-  <!-- Main app shell (shown when signed in) -->
-  <div id="app-shell">
-    <header>
-      <h1>✈️ Trip Planner</h1>
-      <div id="user-area">
-        <img id="user-avatar" src="" alt="avatar" />
-        <span id="user-name"></span>
-        <button id="logout-btn">Sign out</button>
-      </div>
-    </header>
-
-    <main>
-      <div class="toolbar">
-        <h2>My Trips</h2>
-        <button class="btn-primary" id="new-trip-btn">+ New Trip</button>
-      </div>
-
-      <!-- Empty state -->
-      <div id="empty-state" style="display:none">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#718096" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M12 8v4l2 2"/>
-        </svg>
-        <p>No trips yet – create your first one!</p>
-      </div>
-
-      <!-- Trips grid -->
-      <div id="trips-grid"></div>
-    </main>
-  </div>
-
-  <!-- Trip form modal -->
-  <div class="modal-overlay" id="trip-modal" style="display:none">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-header">
-        <h3 id="modal-title">New Trip</h3>
-        <button class="modal-close" id="modal-close-btn" aria-label="Close">×</button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="trip-id" />
-        <div class="form-group">
-          <label for="trip-name">Trip Name *</label>
-          <input type="text" id="trip-name" placeholder="e.g. Summer in Japan" maxlength="80" />
-        </div>
-        <div class="form-group">
-          <label for="trip-destination">Destination</label>
-          <input type="text" id="trip-destination" placeholder="e.g. Tokyo, Kyoto" maxlength="120" />
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="trip-start">Start Date</label>
-            <input type="date" id="trip-start" />
-          </div>
-          <div class="form-group">
-            <label for="trip-end">End Date</label>
-            <input type="date" id="trip-end" />
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="trip-status">Status</label>
-          <select id="trip-status">
-            <option value="planning">Planning</option>
-            <option value="booked">Booked</option>
-            <option value="ongoing">Ongoing</option>
-            <option value="completed">Completed</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="trip-notes">Notes</label>
-          <textarea id="trip-notes" placeholder="Packing list, ideas, reminders…"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-cancel" id="modal-cancel-btn">Cancel</button>
-        <button class="btn-primary" id="modal-save-btn">Save Trip</button>
-      </div>
+<!-- ============ AUTH SCREEN ============ -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <h1>Our Trips</h1>
+    <p>Sign in to see and edit your trips.</p>
+    <button id="auth-google">Sign in with Google</button>
+    <div style="display:flex; align-items:center; gap:10px; margin:18px 0; color:var(--ink-soft); font-size:.78rem;">
+      <div style="flex:1; height:1px; background:var(--line);"></div>OR<div style="flex:1; height:1px; background:var(--line);"></div>
     </div>
+    <input type="email" id="auth-email" placeholder="Email" autocomplete="email">
+    <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+    <button id="auth-submit">Sign in with email</button>
+    <div id="auth-error"></div>
+  </div>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div id="app" class="hidden">
+  <header class="hero">
+    <div class="left">
+      <h1 id="trip-title">Our Trips</h1>
+      <p id="trip-sub">Pick a trip to get started</p>
+    </div>
+    <div class="right">
+      <select id="trip-select"><option>Loading trips…</option></select>
+      <button class="primary" id="btn-new-trip">+ New trip</button>
+      <button id="btn-signout">Sign out</button>
+    </div>
+  </header>
+
+  <div id="empty-state" class="empty-state hidden">
+    <h3>No trips yet</h3>
+    <p>Start with the Copenhagen plan already built, or create a blank one.</p>
+    <button class="primary" id="btn-load-seed">Load Copenhagen (24–30 Aug 2026) starter trip</button>
   </div>
 
-  <!-- Toast notification -->
-  <div id="toast" role="status" aria-live="polite"></div>
+  <nav class="tabs hidden" id="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="places">Places</button>
+    <button data-tab="food">Food</button>
+    <button data-tab="events">Events</button>
+    <button data-tab="days">Day-by-day</button>
+    <button data-tab="budget">Budget</button>
+    <button data-tab="documents">Documents</button>
+    <button data-tab="manage">Manage / Import</button>
+  </nav>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       Firebase SDK (v9 compat – loaded via CDN, no build step)
-  ════════════════════════════════════════════════════════════ -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-
-  <script>
-    // ─────────────────────────────────────────────────────────────
-    // FIREBASE CONFIGURATION
-    // Replace the placeholder values below with your own project's
-    // credentials from the Firebase Console:
-    //   https://console.firebase.google.com → Project Settings → Your apps
-    // ─────────────────────────────────────────────────────────────
-    const firebaseConfig = {
-      apiKey:            "YOUR_API_KEY",
-      authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId:         "YOUR_PROJECT_ID",
-      storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-      appId:             "YOUR_APP_ID"
-    };
-
-    // ─────────────────────────────────────────────────────────────
-    // Initialise Firebase
-    // ─────────────────────────────────────────────────────────────
-    firebase.initializeApp(firebaseConfig);
-    const auth      = firebase.auth();
-    const db        = firebase.firestore();
-    const provider  = new firebase.auth.GoogleAuthProvider();
-
-    // ─────────────────────────────────────────────────────────────
-    // DOM references
-    // ─────────────────────────────────────────────────────────────
-    const $loading      = document.getElementById('loading');
-    const $authScreen   = document.getElementById('auth-screen');
-    const $appShell     = document.getElementById('app-shell');
-    const $loginBtn     = document.getElementById('login-btn');
-    const $logoutBtn    = document.getElementById('logout-btn');
-    const $userAvatar   = document.getElementById('user-avatar');
-    const $userName     = document.getElementById('user-name');
-    const $tripsGrid    = document.getElementById('trips-grid');
-    const $emptyState   = document.getElementById('empty-state');
-    const $newTripBtn   = document.getElementById('new-trip-btn');
-    const $tripModal    = document.getElementById('trip-modal');
-    const $modalTitle   = document.getElementById('modal-title');
-    const $modalClose   = document.getElementById('modal-close-btn');
-    const $modalCancel  = document.getElementById('modal-cancel-btn');
-    const $modalSave    = document.getElementById('modal-save-btn');
-    const $tripId       = document.getElementById('trip-id');
-    const $tripName     = document.getElementById('trip-name');
-    const $tripDest     = document.getElementById('trip-destination');
-    const $tripStart    = document.getElementById('trip-start');
-    const $tripEnd      = document.getElementById('trip-end');
-    const $tripStatus   = document.getElementById('trip-status');
-    const $tripNotes    = document.getElementById('trip-notes');
-    const $toast        = document.getElementById('toast');
-
-    // ─────────────────────────────────────────────────────────────
-    // Auth state listener
-    // ─────────────────────────────────────────────────────────────
-    let unsubscribeTrips = null;
-
-    auth.onAuthStateChanged(user => {
-      $loading.style.display = 'none';
-      if (user) {
-        $userAvatar.src = user.photoURL || '';
-        $userName.textContent = user.displayName || user.email;
-        $authScreen.style.display = 'none';
-        $appShell.style.display   = 'flex';
-        listenToTrips(user.uid);
-      } else {
-        if (unsubscribeTrips) { unsubscribeTrips(); unsubscribeTrips = null; }
-        $appShell.style.display   = 'none';
-        $authScreen.style.display = 'flex';
-        $tripsGrid.innerHTML = '';
-      }
-    });
-
-    // ─────────────────────────────────────────────────────────────
-    // Sign in / Sign out
-    // ─────────────────────────────────────────────────────────────
-    $loginBtn.addEventListener('click', () => {
-      auth.signInWithPopup(provider).catch(err => showToast(err.message, true));
-    });
-
-    $logoutBtn.addEventListener('click', () => {
-      auth.signOut();
-    });
-
-    // ─────────────────────────────────────────────────────────────
-    // Firestore – real-time trip listener
-    // ─────────────────────────────────────────────────────────────
-    function tripsRef(uid) {
-      return db.collection('users').doc(uid).collection('trips');
-    }
-
-    function listenToTrips(uid) {
-      unsubscribeTrips = tripsRef(uid)
-        .orderBy('createdAt', 'desc')
-        .onSnapshot(snapshot => {
-          const trips = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          renderTrips(trips);
-        }, err => showToast('Error loading trips: ' + err.message, true));
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Render trips
-    // ─────────────────────────────────────────────────────────────
-    const statusColors = {
-      planning:  'linear-gradient(90deg,#4299e1,#63b3ed)',
-      booked:    'linear-gradient(90deg,#48bb78,#68d391)',
-      ongoing:   'linear-gradient(90deg,#ed8936,#f6ad55)',
-      completed: 'linear-gradient(90deg,#9f7aea,#b794f4)',
-    };
-
-    function formatDateRange(start, end) {
-      if (!start && !end) return '';
-      const fmt = d => d ? new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
-      return start && end ? `${fmt(start)} → ${fmt(end)}` : fmt(start || end);
-    }
-
-    function renderTrips(trips) {
-      if (trips.length === 0) {
-        $emptyState.style.display = 'block';
-        $tripsGrid.innerHTML = '';
-        return;
-      }
-      $emptyState.style.display = 'none';
-
-      $tripsGrid.innerHTML = trips.map(t => `
-        <div class="trip-card" data-id="${esc(t.id)}">
-          <div class="trip-card-banner" style="background:${statusColors[t.status] || statusColors.planning}"></div>
-          <div class="trip-card-body">
-            <div class="trip-card-title">${esc(t.name)}</div>
-            <div class="trip-card-dates">${t.destination ? '📍 ' + esc(t.destination) + '&ensp;' : ''}${formatDateRange(t.startDate, t.endDate)}</div>
-            <div class="trip-card-note">${esc(t.notes || '')}</div>
-          </div>
-          <div class="trip-card-footer">
-            <button class="btn-sm btn-edit"   data-id="${esc(t.id)}" data-action="edit">Edit</button>
-            <button class="btn-sm btn-delete" data-id="${esc(t.id)}" data-action="delete">Delete</button>
-          </div>
+  <main id="main-content" class="hidden">
+    <section class="panel active" id="p-overview"><div id="overview-body"></div></section>
+    <section class="panel" id="p-places"><div id="places-list"></div></section>
+    <section class="panel" id="p-food"><div id="food-list"></div></section>
+    <section class="panel" id="p-events"><div id="events-list"></div></section>
+    <section class="panel" id="p-days">
+      <div class="daynav" id="daynav"></div>
+      <div id="day-content"></div>
+    </section>
+    <section class="panel" id="p-budget"><div id="budget-body"></div></section>
+    <section class="panel" id="p-documents">
+      <div class="card">
+        <h3>Add a document</h3>
+        <p class="small">Tickets, confirmations, boarding passes — store the reference/confirmation number and a link to the actual file (Google Drive, Dropbox, an email link, whatever you already have it saved as). Then attach it to any place or day-stop from that stop's card.</p>
+        <div class="doc-form">
+          <input id="doc-title" placeholder="Title (e.g. 'Flight ZAG→CPH')">
+          <select id="doc-type">
+            <option>Flight</option><option>Accommodation</option><option>Attraction ticket</option>
+            <option>Restaurant reservation</option><option>Transport</option><option>Other</option>
+          </select>
+          <input id="doc-confirmation" placeholder="Confirmation / booking number (optional)">
+          <input id="doc-url" placeholder="Link to the file (optional)">
+          <textarea id="doc-note" placeholder="Note (optional)" style="min-height:50px;"></textarea>
+          <button class="primary" id="btn-add-doc">Add document</button>
         </div>
-      `).join('');
-    }
+      </div>
+      <div id="documents-list"></div>
+    </section>
+    <section class="panel" id="p-manage">
+      <div class="card">
+        <h3>Import / replace this trip's content</h3>
+        <p class="small">Paste a full trip JSON (places, days, food, events, budget) — ask Claude to generate one in this shape, paste the result here, and it saves live for both of you.</p>
+        <textarea class="jsonbox" id="import-box" placeholder='{"meta":{...},"places":[...],"days":[...],"food":[...],"events":[...],"budget":[...]}'></textarea>
+        <button class="primary" id="btn-import-save" style="margin-top:10px;">Save to this trip</button>
+        <div id="import-status" style="margin-top:8px; font-size:.85rem;"></div>
+      </div>
+      <div class="card">
+        <h3>Danger zone</h3>
+        <button id="btn-delete-trip" style="background:var(--red); color:white; border:none; padding:10px 16px; border-radius:8px; cursor:pointer; font-weight:600;">Delete this trip</button>
+      </div>
+    </section>
+  </main>
+</div>
 
-    // Event delegation for card actions
-    $tripsGrid.addEventListener('click', e => {
-      const btn = e.target.closest('[data-action]');
-      if (!btn) return;
-      const { id, action } = btn.dataset;
-      if (action === 'edit')   openModal(id);
-      if (action === 'delete') deleteTrip(id);
+<div id="sync-toolbar" class="hidden">
+  <span id="sync-status">Connected — changes sync live between signed-in accounts</span>
+</div>
+
+<!-- ============ FIREBASE SDK ============ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+// =========================================================================
+// PASTE YOUR firebaseConfig FROM THE FIREBASE CONSOLE HERE
+// =========================================================================
+const firebaseConfig = {
+  apiKey: "PASTE_YOUR_API_KEY",
+  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
+  projectId: "PASTE_YOUR_PROJECT_ID",
+  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
+  messagingSenderId: "PASTE_YOUR_SENDER_ID",
+  appId: "PASTE_YOUR_APP_ID"
+};
+// =========================================================================
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentTripId = null;
+let notesUnsub = null;
+let state = {places:{}, stops:{}, documents:{}};
+
+// ---------- Auth wiring ----------
+document.getElementById('auth-submit').addEventListener('click', signIn);
+document.getElementById('auth-password').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
+document.getElementById('auth-google').addEventListener('click', signInWithGoogle);
+document.getElementById('btn-signout').addEventListener('click', ()=>auth.signOut());
+function signInWithGoogle(){
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err=>{
+    if(err.code === 'auth/popup-blocked'){
+      errEl.textContent = 'Popup blocked — allow popups for this page and try again.';
+    }else if(err.code === 'auth/unauthorized-domain'){
+      errEl.textContent = 'This domain isn\'t in Authorized domains yet (Firebase console → Authentication → Settings).';
+    }else{
+      errEl.textContent = err.message;
+    }
+  });
+}
+function signIn(){
+  const email = document.getElementById('auth-email').value.trim();
+  const pw = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  auth.signInWithEmailAndPassword(email, pw).catch(err=>{ errEl.textContent = err.message; });
+}
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    document.getElementById('auth-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('sync-toolbar').classList.remove('hidden');
+    loadTripIndex();
+  }else{
+    document.getElementById('auth-screen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('sync-toolbar').classList.add('hidden');
+  }
+});
+
+// ---------- Trip index (small, listed live) ----------
+function loadTripIndex(){
+  db.collection('trips').orderBy('updatedAt','desc').onSnapshot(snap=>{
+    const sel = document.getElementById('trip-select');
+    const empty = document.getElementById('empty-state');
+    if(snap.empty){
+      sel.innerHTML = '<option>No trips yet</option>';
+      empty.classList.remove('hidden');
+      document.getElementById('tabs').classList.add('hidden');
+      document.getElementById('main-content').classList.add('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    sel.innerHTML = '';
+    snap.forEach(doc=>{
+      const d = doc.data();
+      const opt = document.createElement('option');
+      opt.value = doc.id;
+      opt.textContent = `${d.name || doc.id} (${d.dateRange || ''})`;
+      sel.appendChild(opt);
     });
-
-    // ─────────────────────────────────────────────────────────────
-    // Modal helpers
-    // ─────────────────────────────────────────────────────────────
-    function openModal(tripId) {
-      clearModal();
-      if (tripId) {
-        // Load existing trip into form
-        const card = document.querySelector(`.trip-card[data-id="${tripId}"]`);
-        const uid  = auth.currentUser.uid;
-        tripsRef(uid).doc(tripId).get().then(doc => {
-          if (!doc.exists) return;
-          const t = doc.data();
-          $tripId.value        = tripId;
-          $tripName.value      = t.name        || '';
-          $tripDest.value      = t.destination || '';
-          $tripStart.value     = t.startDate   || '';
-          $tripEnd.value       = t.endDate     || '';
-          $tripStatus.value    = t.status      || 'planning';
-          $tripNotes.value     = t.notes       || '';
-          $modalTitle.textContent = 'Edit Trip';
-        });
-      } else {
-        $modalTitle.textContent = 'New Trip';
-      }
-      $tripModal.style.display = 'flex';
-      setTimeout(() => $tripName.focus(), 50);
+    if(!currentTripId) loadTrip(snap.docs[0].id);
+  }, err=>{
+    if(err.code === 'permission-denied'){
+      alert('Your Google account isn\'t on the allow-list for this app yet. Ask whoever set up Firebase to add your email to the Firestore rules.');
+      auth.signOut();
+    }else{
+      console.error(err);
     }
+  });
+}
+document.getElementById('trip-select').addEventListener('change', e=>loadTrip(e.target.value));
 
-    function closeModal() {
-      $tripModal.style.display = 'none';
-      clearModal();
-    }
+document.getElementById('btn-new-trip').addEventListener('click', async ()=>{
+  const name = prompt('Trip name (e.g. "Rome, spring 2027")');
+  if(!name) return;
+  const dateRange = prompt('Dates (e.g. "12–18 Apr 2027")') || '';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '-' + Date.now().toString(36);
+  await db.collection('trips').doc(slug).set({name, dateRange, updatedAt: Date.now()});
+  await db.collection('tripData').doc(slug).set({meta:{name, dateRange, summary:'', ceiling:''}, places:[], days:[], food:[], events:[], budget:[]});
+  await db.collection('tripNotes').doc(slug).set({places:{}, stops:{}, documents:{}});
+  loadTrip(slug);
+});
 
-    function clearModal() {
-      $tripId.value = $tripName.value = $tripDest.value =
-      $tripStart.value = $tripEnd.value = $tripNotes.value = '';
-      $tripStatus.value = 'planning';
-    }
+document.getElementById('btn-load-seed').addEventListener('click', async ()=>{
+  const slug = 'copenhagen-aug-2026';
+  await db.collection('trips').doc(slug).set({name:'Copenhagen', dateRange:'24–30 Aug 2026', updatedAt: Date.now()});
+  await db.collection('tripData').doc(slug).set(SEED_COPENHAGEN);
+  await db.collection('tripNotes').doc(slug).set({places:{}, stops:{}, documents:{}});
+  loadTrip(slug);
+});
 
-    $newTripBtn.addEventListener('click', () => openModal(null));
-    $modalClose.addEventListener('click', closeModal);
-    $modalCancel.addEventListener('click', closeModal);
-    $tripModal.addEventListener('click', e => { if (e.target === $tripModal) closeModal(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.getElementById('btn-delete-trip').addEventListener('click', async ()=>{
+  if(!currentTripId) return;
+  if(!confirm('Delete this trip permanently for both of you?')) return;
+  await db.collection('trips').doc(currentTripId).delete();
+  await db.collection('tripData').doc(currentTripId).delete();
+  await db.collection('tripNotes').doc(currentTripId).delete();
+  currentTripId = null;
+});
 
-    // ─────────────────────────────────────────────────────────────
-    // Save trip (create or update)
-    // ─────────────────────────────────────────────────────────────
-    $modalSave.addEventListener('click', async () => {
-      const name = $tripName.value.trim();
-      if (!name) { $tripName.focus(); showToast('Trip name is required'); return; }
+// ---------- Load a trip ----------
+let tripData = null;
+async function loadTrip(slug){
+  currentTripId = slug;
+  document.getElementById('trip-select').value = slug;
+  const doc = await db.collection('tripData').doc(slug).get();
+  tripData = doc.exists ? doc.data() : {meta:{}, places:[], days:[], food:[], events:[], budget:[]};
+  document.getElementById('tabs').classList.remove('hidden');
+  document.getElementById('main-content').classList.remove('hidden');
+  document.getElementById('trip-title').textContent = tripData.meta?.name || slug;
+  document.getElementById('trip-sub').textContent = tripData.meta?.dateRange || '';
+  document.getElementById('import-box').value = '';
+  document.getElementById('import-status').textContent = '';
 
-      const uid  = auth.currentUser.uid;
-      const id   = $tripId.value;
-      const data = {
-        name,
-        destination: $tripDest.value.trim(),
-        startDate:   $tripStart.value  || null,
-        endDate:     $tripEnd.value    || null,
-        status:      $tripStatus.value,
-        notes:       $tripNotes.value.trim(),
-        updatedAt:   firebase.firestore.FieldValue.serverTimestamp(),
-      };
+  if(notesUnsub) notesUnsub();
+  notesUnsub = db.collection('tripNotes').doc(slug).onSnapshot(snap=>{
+    state = snap.exists ? snap.data() : {places:{}, stops:{}, documents:{}};
+    if(!state.places) state.places = {};
+    if(!state.stops) state.stops = {};
+    if(!state.documents) state.documents = {};
+    renderAll();
+  });
+}
 
-      try {
-        if (id) {
-          await tripsRef(uid).doc(id).update(data);
-          showToast('Trip updated ✓');
-        } else {
-          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-          await tripsRef(uid).add(data);
-          showToast('Trip created ✓');
-        }
-        closeModal();
-      } catch (err) {
-        showToast('Save failed: ' + err.message, true);
-      }
+// ---------- Render helpers ----------
+const mapLink = q => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+const imgLink = q => `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`;
+const dirLink = (from,to) => `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to)}&travelmode=walking`;
+function slugify(s){ return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
+function starsHtml(n){ n=n||0; return '★'.repeat(n)+'☆'.repeat(5-n); }
+function certBadge(c){ const m={green:['b-green','🟢'],yellow:['b-yellow','🟡'],red:['b-red','🔴']}; const x=m[c]||m.yellow; return `<span class="badge ${x[0]}">${x[1]}</span>`; }
+
+function editControls(kind, id){
+  const entry = (state[kind] && state[kind][id]) || {done:false, note:'', linkedDocs:[]};
+  const linkedIds = entry.linkedDocs || [];
+  const allDocs = state.documents || {};
+  const chips = linkedIds.map(docId=>{
+    const d = allDocs[docId];
+    if(!d) return '';
+    const inner = d.url ? `<a href="${d.url}" target="_blank" style="color:inherit;">${d.title}</a>` : d.title;
+    return `<span class="doc-chip">📎 ${inner}<button class="js-unlink-doc" data-kind="${kind}" data-id="${id}" data-docid="${docId}" title="Unlink">×</button></span>`;
+  }).join('');
+  const unlinkedOptions = Object.entries(allDocs).filter(([docId])=>!linkedIds.includes(docId))
+    .map(([docId,d])=>`<option value="${docId}">${d.title}</option>`).join('');
+  return `<div class="edit-row" data-kind="${kind}" data-id="${id}">
+    <label class="edit-check"><input type="checkbox" class="js-done" ${entry.done?'checked':''}> Done / booked</label>
+    <textarea class="js-note" placeholder="Note (times, who's paying, confirmation #...)">${(entry.note||'').replace(/</g,'&lt;')}</textarea>
+    <div>${chips}</div>
+    <div class="link-doc-row">
+      <select class="js-doc-picker" data-kind="${kind}" data-id="${id}">
+        <option value="">${Object.keys(allDocs).length ? 'Link an existing document…' : 'No documents yet'}</option>
+        ${unlinkedOptions}
+      </select>
+      <button class="js-link-doc-btn" data-kind="${kind}" data-id="${id}">Link</button>
+      <button class="js-quick-add-doc" data-kind="${kind}" data-id="${id}">+ New &amp; link</button>
+    </div>
+  </div>`;
+}
+
+async function setDone(kind, id, val){
+  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{done:val}}}, {merge:true});
+}
+async function setNote(kind, id, val){
+  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{note:val}}}, {merge:true});
+}
+async function linkDocTo(kind, id, docId){
+  if(!docId) return;
+  const current = (state[kind]?.[id]?.linkedDocs) || [];
+  if(current.includes(docId)) return;
+  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{linkedDocs:[...current, docId]}}}, {merge:true});
+}
+async function unlinkDocFrom(kind, id, docId){
+  const current = (state[kind]?.[id]?.linkedDocs) || [];
+  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{linkedDocs: current.filter(d=>d!==docId)}}}, {merge:true});
+}
+async function addDocument(doc){
+  const docId = 'doc-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  await db.collection('tripNotes').doc(currentTripId).set({documents:{[docId]:{...doc, createdAt:Date.now()}}}, {merge:true});
+  return docId;
+}
+async function deleteDocument(docId){
+  if(!confirm('Delete this document? It will be unlinked from everywhere it\'s attached.')) return;
+  await db.collection('tripNotes').doc(currentTripId).update({[`documents.${docId}`]: firebase.firestore.FieldValue.delete()});
+  // best-effort cleanup of dangling links
+  ['places','stops'].forEach(kind=>{
+    Object.entries(state[kind]||{}).forEach(([id, entry])=>{
+      if((entry.linkedDocs||[]).includes(docId)) unlinkDocFrom(kind, id, docId);
     });
+  });
+}
 
-    // ─────────────────────────────────────────────────────────────
-    // Delete trip
-    // ─────────────────────────────────────────────────────────────
-    async function deleteTrip(id) {
-      if (!confirm('Delete this trip?')) return;
-      try {
-        await tripsRef(auth.currentUser.uid).doc(id).delete();
-        showToast('Trip deleted');
-      } catch (err) {
-        showToast('Delete failed: ' + err.message, true);
-      }
-    }
+document.body.addEventListener('change', e=>{
+  if(e.target.classList.contains('js-done')){
+    const w = e.target.closest('.edit-row');
+    setDone(w.dataset.kind, w.dataset.id, e.target.checked);
+  }
+});
+document.body.addEventListener('input', e=>{
+  if(e.target.classList.contains('js-note')){
+    const w = e.target.closest('.edit-row');
+    setNote(w.dataset.kind, w.dataset.id, e.target.value);
+  }
+});
+document.body.addEventListener('click', e=>{
+  if(e.target.classList.contains('js-unlink-doc')){
+    unlinkDocFrom(e.target.dataset.kind, e.target.dataset.id, e.target.dataset.docid);
+  }
+  if(e.target.classList.contains('js-link-doc-btn')){
+    const row = e.target.closest('.link-doc-row');
+    const sel = row.querySelector('.js-doc-picker');
+    linkDocTo(e.target.dataset.kind, e.target.dataset.id, sel.value);
+  }
+  if(e.target.classList.contains('js-quick-add-doc')){
+    const title = prompt('Document title (e.g. "Flight ZAG→CPH" or "Tivoli tickets")');
+    if(!title) return;
+    const url = prompt('Link to the file (optional — Google Drive, email, etc.)') || '';
+    addDocument({title, type:'Other', confirmationNumber:'', url, note:''}).then(docId=>{
+      linkDocTo(e.target.dataset.kind, e.target.dataset.id, docId);
+    });
+  }
+  if(e.target.classList.contains('js-delete-doc')){
+    deleteDocument(e.target.dataset.docid);
+  }
+  if(e.target.classList.contains('js-edit-doc')){
+    const docId = e.target.dataset.docid;
+    const d = state.documents[docId];
+    const title = prompt('Title', d.title); if(title===null) return;
+    const confirmationNumber = prompt('Confirmation / booking number', d.confirmationNumber||'');
+    const url = prompt('Link to file', d.url||'');
+    const note = prompt('Note', d.note||'');
+    db.collection('tripNotes').doc(currentTripId).set({documents:{[docId]:{title, confirmationNumber, url, note}}}, {merge:true});
+  }
+});
 
-    // ─────────────────────────────────────────────────────────────
-    // Toast notification
-    // ─────────────────────────────────────────────────────────────
-    let toastTimer;
-    function showToast(msg, isError = false) {
-      $toast.textContent = msg;
-      $toast.style.background = isError ? '#c53030' : '#2d3748';
-      $toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => $toast.classList.remove('show'), 3000);
-    }
+document.getElementById('btn-add-doc').addEventListener('click', ()=>{
+  const title = document.getElementById('doc-title').value.trim();
+  if(!title){ alert('Give it a title first.'); return; }
+  addDocument({
+    title,
+    type: document.getElementById('doc-type').value,
+    confirmationNumber: document.getElementById('doc-confirmation').value.trim(),
+    url: document.getElementById('doc-url').value.trim(),
+    note: document.getElementById('doc-note').value.trim()
+  });
+  ['doc-title','doc-confirmation','doc-url','doc-note'].forEach(id=>document.getElementById(id).value='');
+});
 
-    // ─────────────────────────────────────────────────────────────
-    // HTML-escape helper (prevent XSS from stored data)
-    // ─────────────────────────────────────────────────────────────
-    function esc(str) {
-      if (str == null) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-  </script>
+function renderAll(){
+  renderOverview(); renderPlaces(); renderFood(); renderEvents(); renderDays(); renderBudget(); renderDocuments();
+}
+
+function renderDocuments(){
+  const el = document.getElementById('documents-list');
+  const docs = Object.entries(state.documents||{}).sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0));
+  if(!docs.length){ el.innerHTML = '<p class="small">No documents added yet — add your flight, hotel, and ticket confirmations above, then attach them to specific places or day-stops.</p>'; return; }
+  el.innerHTML = docs.map(([docId,d])=>`
+    <div class="card doc-card">
+      <div>
+        <span class="doc-type">${d.type||'Other'}</span>
+        <div class="place-name">${d.title}</div>
+        ${d.confirmationNumber?`<div class="place-meta mono">Confirmation: ${d.confirmationNumber}</div>`:''}
+        ${d.note?`<div class="place-meta">${d.note}</div>`:''}
+        ${d.url?`<a class="maplink" href="${d.url}" target="_blank">Open file ↗</a>`:''}
+      </div>
+      <div class="doc-actions">
+        <button class="js-edit-doc" data-docid="${docId}">Edit</button>
+        <button class="js-delete-doc" data-docid="${docId}">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderOverview(){
+  const m = tripData.meta || {};
+  document.getElementById('overview-body').innerHTML = `
+    <div class="card"><h3>${m.name||''}</h3><p>${m.summary||'No summary yet — add one via the Manage tab.'}</p>
+    ${m.ceiling?`<p class="mono">Budget ceiling: ${m.ceiling}</p>`:''}</div>`;
+}
+
+function renderPlaces(){
+  const el = document.getElementById('places-list');
+  el.innerHTML = '';
+  (tripData.places||[]).slice().sort((a,b)=>(b.stars||0)-(a.stars||0)).forEach((p,i)=>{
+    const id = slugify(p.name);
+    const row = document.createElement('div');
+    row.className = 'place-row';
+    row.innerHTML = `
+      <div class="place-name">${i+1}. ${p.name} <span class="stars">${starsHtml(p.stars)}</span> ${certBadge(p.certainty)}</div>
+      <div class="place-meta">${p.area||''} · ${p.price||''} · ${p.hours||''}</div>
+      <div class="place-meta">${p.note||''}</div>
+      <div><a class="maplink" href="${mapLink(p.q||p.name)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(p.q||p.name)}" target="_blank">Photos ↗</a></div>
+      ${editControls('places', id)}`;
+    el.appendChild(row);
+  });
+  if(!(tripData.places||[]).length) el.innerHTML = '<p class="small">No places added yet.</p>';
+}
+
+function renderFood(){
+  const el = document.getElementById('food-list');
+  el.innerHTML = (tripData.food||[]).map(f=>`
+    <div class="card">
+      <h3>${f.name} ${f.stars?`<span class="stars">${starsHtml(f.stars)}</span>`:''}</h3>
+      <p class="small">${f.desc||''}</p>
+      <a class="maplink" href="${mapLink(f.q||f.name)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(f.q||f.name)}" target="_blank">Photos ↗</a>
+      ${f.alt?`<div class="stop-alt">${f.alt}</div>`:''}
+    </div>`).join('') || '<p class="small">No restaurants added yet.</p>';
+}
+
+function renderEvents(){
+  const el = document.getElementById('events-list');
+  el.innerHTML = (tripData.events||[]).map(ev=>`
+    <div class="card"><h3>${ev.name} ${certBadge(ev.certainty||'yellow')}</h3><p class="small">${ev.desc||''}</p></div>`).join('') || '<p class="small">No events added yet.</p>';
+}
+
+function renderBudget(){
+  const rows = (tripData.budget||[]).map(b=>`<tr><td>${b.category}</td><td class="mono">${b.estimate}</td><td>${b.note||''}</td></tr>`).join('');
+  document.getElementById('budget-body').innerHTML = `<div class="card"><table><tr><th>Category</th><th>Estimate</th><th>Notes</th></tr>${rows}</table></div>` || '<p class="small">No budget yet.</p>';
+}
+
+function renderDays(){
+  const daynav = document.getElementById('daynav');
+  const content = document.getElementById('day-content');
+  daynav.innerHTML = ''; content.innerHTML = '';
+  (tripData.days||[]).forEach((d,i)=>{
+    const btn = document.createElement('button');
+    btn.textContent = d.label; btn.dataset.idx = i;
+    if(i===0) btn.classList.add('active');
+    daynav.appendChild(btn);
+
+    const block = document.createElement('div');
+    block.className = 'day-block' + (i===0?' active':'');
+    block.dataset.idx = i;
+    let stopsHtml = (d.stops||[]).map((s,idx)=>{
+      const stopId = slugify(d.label)+'-'+slugify(s.name);
+      const nextS = d.stops[idx+1];
+      const route = (!s.transit && s.q && nextS && nextS.q) ? `<a class="maplink" href="${dirLink(s.q,nextS.q)}" target="_blank">→ route to next</a>` : '';
+      return `<div class="stop">
+        <div class="stop-time">${s.t||''}</div>
+        <h4>${s.name}</h4>
+        <div class="stop-desc">${s.desc||''}</div>
+        ${s.alt?`<div class="stop-alt">☔ ${s.alt}</div>`:''}
+        ${s.q?`<a class="maplink" href="${mapLink(s.q)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(s.q)}" target="_blank">Photos ↗</a>`:''} ${route}
+        ${editControls('stops', stopId)}
+      </div>`;
+    }).join('');
+    block.innerHTML = `<h3>${d.label}</h3><p class="small"><b>${d.theme||''}</b> ${d.sub||''}</p>${stopsHtml}`;
+    content.appendChild(block);
+  });
+}
+document.getElementById('daynav').addEventListener('click', e=>{
+  if(e.target.tagName!=='BUTTON') return;
+  document.querySelectorAll('#daynav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.day-block').forEach(b=>b.classList.remove('active'));
+  e.target.classList.add('active');
+  document.querySelector(`.day-block[data-idx="${e.target.dataset.idx}"]`).classList.add('active');
+});
+
+// ---------- Tabs ----------
+document.getElementById('tabs').addEventListener('click', e=>{
+  if(e.target.tagName!=='BUTTON') return;
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('p-'+e.target.dataset.tab).classList.add('active');
+});
+
+// ---------- Import / save JSON ----------
+document.getElementById('btn-import-save').addEventListener('click', async ()=>{
+  const statusEl = document.getElementById('import-status');
+  try{
+    const parsed = JSON.parse(document.getElementById('import-box').value);
+    await db.collection('tripData').doc(currentTripId).set(parsed);
+    await db.collection('trips').doc(currentTripId).set({
+      name: parsed.meta?.name || currentTripId,
+      dateRange: parsed.meta?.dateRange || '',
+      updatedAt: Date.now()
+    }, {merge:true});
+    tripData = parsed;
+    renderAll();
+    statusEl.style.color = 'var(--moss)';
+    statusEl.textContent = 'Saved — synced live to both accounts.';
+  }catch(err){
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = 'Could not parse/save: ' + err.message;
+  }
+});
+
+// ---------- Seed data: your existing Copenhagen plan, condensed into the generic schema ----------
+const SEED_COPENHAGEN = {
+  meta:{ name:'Copenhagen', dateRange:'24–30 Aug 2026', ceiling:'€2000 for two',
+    summary:'Six days from Zagreb, staying at Robert Jacobsens Vej 57 (Ørestad). Built as 8 interchangeable day-modules so you can swap freely.' },
+  places:[
+    {stars:5,name:"Tivoli Gardens",area:"City Centre",price:"~170–195 DKK entry",hours:"11:00–23:00, open through 22 Sep 2026",note:"The amusement park.",certainty:"green",q:"Tivoli Gardens Copenhagen"},
+    {stars:5,name:"Nyhavn",area:"City Centre",price:"Free",hours:"Always",note:"Colourful 17th-c. harbour.",certainty:"green",q:"Nyhavn Copenhagen"},
+    {stars:5,name:"Church of Our Saviour (Vor Frelsers Kirke)",area:"Christianshavn",price:"Church free · tower ~69 DKK",hours:"11:00–15:30 daily; tower closes in rain/wind",note:"The spiral 'stairway to heaven' tower.",certainty:"green",q:"Church of Our Saviour Vor Frelsers Kirke Copenhagen"},
+    {stars:5,name:"Freetown Christiania",area:"Christianshavn",price:"Free",hours:"Always (no photos on Pusher St.)",note:"The hippie district.",certainty:"green",q:"Freetown Christiania Copenhagen"},
+    {stars:5,name:"Reffen",area:"Refshaleøen",price:"Pay per stall",hours:"~11:30–20:30+ daily, Apr–Oct",note:"Street food market across the water.",certainty:"green",q:"Reffen Refshalevej 167A Copenhagen"},
+    {stars:5,name:"Copenhagen Botanical Garden",area:"City Centre",price:"Free, Palm House small fee",hours:"08:30–18:00 (Mar–Oct)",note:"The garden from your last visit.",certainty:"green",q:"Copenhagen Botanical Garden"},
+    {stars:4,name:"Canal boat tour",area:"Nyhavn",price:"60–129 DKK",hours:"Frequent daytime departures",note:"Do this early as a city overview.",certainty:"green",q:"Nyhavn canal boat tour departure"},
+    {stars:4,name:"Strøget",area:"City Centre",price:"Free to browse",hours:"~10:00–18:00",note:"Main shopping street.",certainty:"green",q:"Stroget Copenhagen"},
+    {stars:4,name:"Rundetaarn",area:"City Centre",price:"~45 DKK",hours:"~10:00–20:00",note:"Climbable spiral-ramp tower.",certainty:"yellow",q:"Rundetaarn Round Tower Copenhagen"},
+    {stars:4,name:"Amalienborg Palace",area:"Frederiksstaden",price:"Free courtyard",hours:"Guard change ~12:00",note:"Royal residence.",certainty:"green",q:"Amalienborg Palace Copenhagen"},
+    {stars:4,name:"The Little Mermaid",area:"Langelinie",price:"Free",hours:"Always",note:"Small statue, big reputation.",certainty:"green",q:"The Little Mermaid statue Copenhagen"},
+    {stars:4,name:"Kastellet",area:"Langelinie",price:"Free",hours:"06:00–22:00",note:"Star-shaped fortress, ramparts walk.",certainty:"green",q:"Kastellet Copenhagen"},
+    {stars:4,name:"Torvehallerne",area:"Nørreport",price:"Pay per stall",hours:"~10:00–19:00",note:"Glass-hall food market.",certainty:"green",q:"Torvehallerne Copenhagen"},
+    {stars:4,name:"Kødbyen",area:"Vesterbro",price:"Varies",hours:"Evenings",note:"Meatpacking district, Cooking Festival hub 27–30 Aug.",certainty:"green",q:"Kodbyen Meatpacking District Copenhagen"},
+    {stars:4,name:"Assistens Cemetery",area:"Nørrebro",price:"Free",hours:"07:00–dusk",note:"H.C. Andersen and Kierkegaard's graves.",certainty:"green",q:"Assistens Cemetery Norrebro Copenhagen"},
+    {stars:4,name:"Superkilen park",area:"Nørrebro",price:"Free",hours:"Always",note:"Bold multicultural park.",certainty:"green",q:"Superkilen Norrebro Copenhagen"},
+    {stars:3,name:"Copenhagen Cathedral",area:"City Centre",price:"Free",hours:"~08:00–17:00",note:"Main church, closed during services.",certainty:"yellow",q:"Vor Frue Kirke Copenhagen Cathedral"},
+    {stars:3,name:"Marble Church",area:"Frederiksstaden",price:"Free",hours:"~10:00–17:00",note:"Huge copper dome near Amalienborg.",certainty:"yellow",q:"Marble Church Frederiks Kirke Copenhagen"},
+    {stars:3,name:"Grundtvig's Church",area:"Bispebjerg",price:"Free",hours:"~09:00–16:00",note:"Striking 1940s brick architecture.",certainty:"yellow",q:"Grundtvigs Kirke Copenhagen"},
+    {stars:3,name:"National Museum of Denmark",area:"City Centre",price:"Free permanent collection",hours:"10:00–17:00, closed Mon",note:"Broad Danish history.",certainty:"yellow",q:"National Museum of Denmark"},
+    {stars:3,name:"Designmuseum Denmark",area:"Frederiksstaden",price:"~130 DKK",hours:"11:00–18:00, closed Mon",note:"Danish design.",certainty:"yellow",q:"Designmuseum Denmark Copenhagen"},
+    {stars:3,name:"Christiansborg Palace Tower",area:"City Centre",price:"Free",hours:"~10:00–21:00",note:"Free viewpoint, less crowded.",certainty:"yellow",q:"Christiansborg Tower Copenhagen"},
+    {stars:3,name:"Frederiksberg Gardens",area:"Frederiksberg",price:"Free",hours:"06:00–dusk",note:"Quieter park alternative.",certainty:"green",q:"Frederiksberg Gardens Copenhagen"},
+    {stars:3,name:"Opera House",area:"Holmen",price:"Free to view",hours:"Always",note:"Modern landmark, great harbour photo.",certainty:"green",q:"Copenhagen Opera House"}
+  ],
+  food:[
+    {stars:5,name:"POPL Burger",area:"Christianshavn",desc:"Strandgade 108 — Noma-chef burger bar. Reserve online, set menu ~450 DKK/person.",q:"POPL Burger Strandgade 108 Copenhagen"},
+    {stars:4,name:"Jah Izakaya & Sake Bar",area:"Vesterbro",desc:"Gasværksvej 21 — first sake bar in CPH, small shareable plates. Reserve ahead.",q:"Jah Izakaya Sake Bar Copenhagen"},
+    {stars:4,name:"Restaurant Schønnemann",area:"City Centre",desc:"Historic smørrebrød house since 1877. Reserve, especially for lunch.",q:"Restaurant Schonnemann Copenhagen",alt:"Rich/rye/herring — pace yourselves if stomach-sensitive."},
+    {stars:5,name:"Reffen",area:"Refshaleøen",desc:"30–50 street food stalls, reached by harbour bus. Daily ~11:30–20:30+, Apr–Oct.",q:"Reffen Refshalevej 167A Copenhagen"},
+    {stars:5,name:"Hart Bageri",area:"Vesterbro",desc:"Gl. Kongevej 109 — top artisan bakery, go early on weekends.",q:"Hart Bageri Gl Kongevej 109 Copenhagen"},
+    {stars:4,name:"Sanchez",area:"Vesterbro",desc:"Mexican-Nordic by chef Rosio Sanchez (ex-Noma). Reserve ahead.",q:"Sanchez restaurant Rosio Copenhagen"},
+    {stars:4,name:"Cofoco",area:"Vesterbro",desc:"Affordable 3-course New Nordic set menu, ~395 DKK/person. Reserve.",q:"Cofoco restaurant Copenhagen"},
+    {stars:3,name:"DØP hot dog cart",area:"City Centre",desc:"Organic Danish hot dogs, ~40–60 DKK, no reservation needed.",q:"DOP hotdog Copenhagen"},
+    {stars:4,name:"The Coffee Collective",area:"Multiple",desc:"Copenhagen's best-known specialty roaster.",q:"The Coffee Collective Copenhagen"}
+  ],
+  events:[
+    {name:"Copenhagen Cooking & Food Festival",certainty:"green",desc:"21–30 Aug 2026, covers your whole stay. Kødbyen hub live Thu 27–Sun 30 Aug."},
+    {name:"Live music / theatre in English",certainty:"red",desc:"Venue calendars (Jazzhus Montmartre, Vega, Royal Danish Theatre) publish 6–10 weeks out — check closer to travel."}
+  ],
+  budget:[
+    {category:"Mon: single/24h transport",estimate:"€28–160",note:"See Transport notes"},
+    {category:"Copenhagen Card Discover, 120h ×2",estimate:"≈ €380",note:"Covers Tue–Sun transport + Tivoli + Church tower + a canal tour"},
+    {category:"Tivoli rides (optional)",estimate:"€50–60",note:"Never covered by any pass"},
+    {category:"Reffen (1 visit)",estimate:"≈ €65",note:""},
+    {category:"POPL Burger dinner",estimate:"≈ €120",note:"À la carte cheaper, ~€25–30/person"},
+    {category:"Jah Izakaya dinner",estimate:"€70–150",note:""},
+    {category:"Smørrebrød lunch",estimate:"≈ €45",note:""},
+    {category:"Everyday meals/coffee/snacks",estimate:"≈ €180",note:"~€30/day/couple average"},
+    {category:"Optional car/train day",estimate:"€0–160",note:"€0 if train day-trip is covered by the Card"},
+    {category:"Shopping / buffer",estimate:"€840–1110",note:"What's left under the €2000 ceiling"}
+  ],
+  days:[
+    {label:"Day 1 · Mon 24 · Arrival",theme:"Christianshavn, gently",sub:"Land ~11:00, ease in. ~4–5k steps.",stops:[
+      {t:"~13:00",name:"Settle in at Robert Jacobsens Vej 57",desc:"Drop bags, quick reset.",q:"Robert Jacobsens Vej 57 Copenhagen"},
+      {t:"~14:30",name:"Metro/bus into Christianshavn",desc:"~10–15 min from Ørestad.",transit:true},
+      {t:"~15:00",name:"Wander Christianshavn canals",desc:"Houseboats, small bridges.",q:"Christianshavns Kanal Copenhagen"},
+      {t:"~15:45",name:"Church of Our Saviour — exterior + free interior",desc:"Save the tower for a clear day.",q:"Vor Frelsers Kirke Copenhagen",alt:"Fully indoor already."},
+      {t:"~17:00",name:"POPL Burger, early dinner",desc:"On the water in Christianshavn.",q:"POPL Burger Copenhagen"},
+      {t:"~19:00",name:"Evening walk to Nyhavn",desc:"20 min walk along the harbour.",q:"Nyhavn Copenhagen"}
+    ]},
+    {label:"Day 2 · Indre By classic",theme:"City centre + boat tour",sub:"~14–16k steps.",stops:[
+      {t:"09:30",name:"Nyhavn",desc:"Before the crowds.",q:"Nyhavn Copenhagen"},
+      {t:"10:15",name:"Canal boat tour (~1hr)",desc:"Netto-Bådene or Stromma.",q:"Nyhavn canal boat tour"},
+      {t:"11:30",name:"Strøget — first look",desc:"Window-shop, note what to buy later.",q:"Stroget Copenhagen"},
+      {t:"12:15",name:"Rundetaarn",desc:"Spiral ramp climb.",q:"Rundetaarn Copenhagen",alt:"Fully indoor climb."},
+      {t:"13:00",name:"Lunch at Torvehallerne",desc:"Easy variety.",q:"Torvehallerne Copenhagen"},
+      {t:"14:30",name:"Copenhagen Cathedral",desc:"Quick free stop.",q:"Vor Frue Kirke Copenhagen"},
+      {t:"15:15",name:"Amalienborg + guard grounds",desc:"Guard change ~12:00 if reordering.",q:"Amalienborg Palace Copenhagen"},
+      {t:"16:00",name:"Marble Church",desc:"Huge dome, free.",q:"Marmorkirken Copenhagen"},
+      {t:"17:00",name:"Little Mermaid + Kastellet",desc:"Ramparts walk to unwind.",q:"Kastellet Copenhagen"},
+      {t:"19:00",name:"Dinner — your call",desc:"Open choice back in the centre.",q:"Restaurants Copenhagen city centre"}
+    ]},
+    {label:"Day 3 · Christiania + Christianshavn deep",theme:"Hippie district, church tower",sub:"~10–12k steps.",stops:[
+      {t:"10:30",name:"Freetown Christiania",desc:"1.5–2 hrs — no photos on Pusher Street.",q:"Freetown Christiania Copenhagen"},
+      {t:"12:30",name:"Lunch near Christianshavn",desc:"Cafés on Torvegade.",q:"restaurants Torvegade Christianshavn"},
+      {t:"14:00",name:"Church of Our Saviour — tower climb",desc:"Only if dry/calm — book a slot.",q:"Vor Frelsers Kirke tower Copenhagen",alt:"Swap for Christiansborg Tower (free, indoor) if windy/rainy."},
+      {t:"15:15",name:"Christianshavn canal walk",desc:"Easy recovery after 400 steps.",q:"Christianshavns Kanal Copenhagen"},
+      {t:"16:30",name:"Opera House view",desc:"Free, 15 min.",q:"Copenhagen Opera House view"},
+      {t:"18:30",name:"Dinner: Jah Izakaya",desc:"~20 min transit into Vesterbro.",q:"Jah Izakaya Copenhagen"}
+    ]},
+    {label:"Day 4 · Tivoli + Vesterbro/Kødbyen",theme:"Amusement park + Cooking Festival hub",sub:"Best Thu 27+. ~8–14k steps.",stops:[
+      {t:"11:00",name:"Tivoli Gardens",desc:"3–5 hrs, or flip to evening for the lights.",q:"Tivoli Gardens Copenhagen",alt:"Mostly fine in light rain — many covered pavilions."},
+      {t:"15:30",name:"Walk to Vesterbro/Kødbyen",desc:"15 min past the murals.",q:"Kodbyen Copenhagen"},
+      {t:"16:00",name:"Cooking & Food Festival hub",desc:"Live Thu 27–Sun 30 Aug only.",q:"Kodbyen Meatpacking District Copenhagen"},
+      {t:"19:00",name:"Dinner: Jah Izakaya",desc:"Right here in Vesterbro.",q:"Jah Izakaya Copenhagen"}
+    ]},
+    {label:"Day 5 · Parks & Nørrebro",theme:"Botanical Garden, alt-Nørrebro",sub:"~10–13k steps.",stops:[
+      {t:"10:00",name:"Copenhagen Botanical Garden",desc:"1–1.5 hrs.",q:"Copenhagen Botanical Garden",alt:"Palm House sheltered; open grounds less so."},
+      {t:"11:30",name:"Kongens Have / Rosenborg grounds",desc:"Free royal garden next door.",q:"Kongens Have Rosenborg Copenhagen"},
+      {t:"~12:30–14:30",name:"Free block / rest",desc:"Your requested open slot.",q:""},
+      {t:"14:30",name:"Metro/bus to Nørrebro",desc:"~10–15 min.",transit:true},
+      {t:"15:00",name:"Assistens Cemetery",desc:"Calm, green, unusual.",q:"Assistens Cemetery Copenhagen"},
+      {t:"16:00",name:"Nørrebrogade + Superkilen",desc:"Multicultural main street, colourful park.",q:"Superkilen Copenhagen"},
+      {t:"18:00",name:"Dinner in Nørrebro",desc:"Jægersborggade has good casual options.",q:"Jaegersborggade restaurants Copenhagen"}
+    ]},
+    {label:"Day 6 · Reffen & the harbour",theme:"Street food + boat + Mermaid loop",sub:"~9–12k steps, flat.",stops:[
+      {t:"12:00",name:"Harbour bus to Refshaleøen",desc:"5–15 min, itself a mini boat tour.",q:"Nordre Toldbod harbour bus stop Copenhagen"},
+      {t:"12:30",name:"Reffen",desc:"2 hrs minimum.",q:"Reffen Copenhagen",alt:"Mostly outdoor — swap for Torvehallerne if wet."},
+      {t:"15:00",name:"Harbour bus back",desc:"Opposite direction.",transit:true},
+      {t:"15:30",name:"Little Mermaid + Langelinie",desc:"Waterfront walk.",q:"The Little Mermaid Copenhagen"},
+      {t:"16:15",name:"Kastellet",desc:"Ramparts, windmill.",q:"Kastellet Copenhagen"},
+      {t:"18:00",name:"Free block / rest",desc:"Second open slot.",q:""}
+    ]},
+    {label:"Day 7 · Museums, shopping & buffer",theme:"Catch-up day",sub:"~6–10k steps.",stops:[
+      {t:"10:30",name:"Pick ONE museum",desc:"National Museum or Designmuseum, not both.",q:"National Museum of Denmark"},
+      {t:"12:30",name:"Lunch: Restaurant Schønnemann",desc:"Classic smørrebrød — book ahead.",q:"Restaurant Schonnemann Copenhagen"},
+      {t:"14:00",name:"Strøget — the actual shopping pass",desc:"Now you know what you want.",q:"Stroget Copenhagen"},
+      {t:"16:00",name:"Christiansborg Tower",desc:"Free indoor-accessible viewpoint.",q:"Christiansborg Tower Copenhagen",alt:"Good rainy-day anchor for the whole day."}
+    ]},
+    {label:"Day 8 (optional) · Car/train day",theme:"If your brother rents a car",sub:"Slot in anywhere.",stops:[
+      {t:"Option A",name:"Kronborg Castle, Helsingør",desc:"~45 min drive, 'Hamlet's castle'.",q:"Kronborg Castle Helsingor"},
+      {t:"Option B",name:"Louisiana Museum, Humlebæk",desc:"~35 min drive, art + architecture on the coast.",q:"Louisiana Museum of Modern Art Humlebaek"},
+      {t:"Option C",name:"Roskilde: Viking Ship Museum",desc:"~30 min drive, opposite direction.",q:"Roskilde Viking Ship Museum"}
+    ]}
+  ]
+};
+</script>
 </body>
 </html>
