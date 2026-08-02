@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trip Planner</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+    }
+
+    /* ── Auth screen ──────────────────────────────────────────── */
+    #auth-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 1.5rem;
+      padding: 2rem;
+    }
+    #auth-screen h1 { font-size: 2.2rem; color: #2d3748; }
+    #auth-screen p  { color: #718096; font-size: 1.05rem; }
+    #login-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: #fff;
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      padding: 0.7rem 1.4rem;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08);
+      transition: box-shadow .15s;
+    }
+    #login-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,.14); }
+    #login-btn img { width: 20px; height: 20px; }
+
+    /* ── App shell ────────────────────────────────────────────── */
+    #app-shell { display: none; min-height: 100vh; flex-direction: column; }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      background: #2b6cb0;
+      color: #fff;
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    }
+    header h1 { font-size: 1.3rem; letter-spacing: .5px; }
+    #user-area { display: flex; align-items: center; gap: .8rem; }
+    #user-avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #90cdf4; }
+    #user-name { font-size: .9rem; opacity: .9; }
+    #logout-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.5);
+      color: #fff;
+      border-radius: 6px;
+      padding: .3rem .7rem;
+      font-size: .85rem;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    #logout-btn:hover { background: rgba(255,255,255,.15); }
+
+    /* ── Main content ─────────────────────────────────────────── */
+    main { flex: 1; padding: 1.5rem; max-width: 900px; width: 100%; margin: 0 auto; }
+
+    /* ── Toolbar ──────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.2rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .toolbar h2 { font-size: 1.3rem; color: #2d3748; }
+    .btn-primary {
+      background: #2b6cb0;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: .55rem 1.1rem;
+      font-size: .95rem;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-primary:hover { background: #2c5282; }
+
+    /* ── Trip cards grid ──────────────────────────────────────── */
+    #trips-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1.1rem;
+    }
+    .trip-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.07);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .trip-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+    .trip-card-banner {
+      height: 8px;
+      background: linear-gradient(90deg, #4299e1, #9f7aea);
+    }
+    .trip-card-body { padding: 1rem 1.1rem; }
+    .trip-card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: .3rem; color: #2d3748; }
+    .trip-card-dates { font-size: .82rem; color: #718096; margin-bottom: .5rem; }
+    .trip-card-note {
+      font-size: .87rem;
+      color: #4a5568;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .trip-card-footer {
+      padding: .6rem 1.1rem;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: flex-end;
+      gap: .5rem;
+    }
+    .btn-sm {
+      border: none;
+      border-radius: 6px;
+      padding: .3rem .7rem;
+      font-size: .82rem;
+      cursor: pointer;
+    }
+    .btn-edit  { background: #ebf8ff; color: #2b6cb0; }
+    .btn-edit:hover  { background: #bee3f8; }
+    .btn-delete { background: #fff5f5; color: #c53030; }
+    .btn-delete:hover { background: #fed7d7; }
+
+    /* ── Empty state ──────────────────────────────────────────── */
+    #empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #a0aec0;
+    }
+    #empty-state svg { opacity: .4; margin-bottom: 1rem; }
+    #empty-state p { font-size: 1.05rem; }
+
+    /* ── Modal overlay ────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+      padding: 1rem;
+    }
+    .modal {
+      background: #fff;
+      border-radius: 14px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      overflow: hidden;
+    }
+    .modal-header {
+      background: #2b6cb0;
+      color: #fff;
+      padding: 1rem 1.3rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-header h3 { font-size: 1.1rem; }
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 1.4rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .modal-body { padding: 1.3rem; display: flex; flex-direction: column; gap: .9rem; }
+    .form-group { display: flex; flex-direction: column; gap: .3rem; }
+    .form-group label { font-size: .88rem; font-weight: 600; color: #4a5568; }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      padding: .55rem .75rem;
+      font-size: .95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus { border-color: #4299e1; }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+    .modal-footer {
+      padding: .9rem 1.3rem;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: flex-end;
+      gap: .6rem;
+    }
+    .btn-cancel {
+      background: #edf2f7;
+      border: none;
+      border-radius: 8px;
+      padding: .55rem 1.1rem;
+      font-size: .95rem;
+      cursor: pointer;
+    }
+    .btn-cancel:hover { background: #e2e8f0; }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem; right: 1.5rem;
+      background: #2d3748;
+      color: #fff;
+      border-radius: 8px;
+      padding: .7rem 1.2rem;
+      font-size: .9rem;
+      box-shadow: 0 4px 14px rgba(0,0,0,.25);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .25s, transform .25s;
+      pointer-events: none;
+      z-index: 300;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Loading spinner ──────────────────────────────────────── */
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-size: 1.1rem;
+      color: #718096;
+      gap: .6rem;
+    }
+    .spinner {
+      width: 22px; height: 22px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #4299e1;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .form-row { grid-template-columns: 1fr; }
+      #user-name { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading indicator shown while Firebase initialises -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading…</span>
+  </div>
+
+  <!-- Auth screen (shown when signed out) -->
+  <div id="auth-screen" style="display:none">
+    <h1>✈️ Trip Planner</h1>
+    <p>Sign in to plan and manage your trips</p>
+    <button id="login-btn">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+      Sign in with Google
+    </button>
+  </div>
+
+  <!-- Main app shell (shown when signed in) -->
+  <div id="app-shell">
+    <header>
+      <h1>✈️ Trip Planner</h1>
+      <div id="user-area">
+        <img id="user-avatar" src="" alt="avatar" />
+        <span id="user-name"></span>
+        <button id="logout-btn">Sign out</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="toolbar">
+        <h2>My Trips</h2>
+        <button class="btn-primary" id="new-trip-btn">+ New Trip</button>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty-state" style="display:none">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#718096" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 8v4l2 2"/>
+        </svg>
+        <p>No trips yet – create your first one!</p>
+      </div>
+
+      <!-- Trips grid -->
+      <div id="trips-grid"></div>
+    </main>
+  </div>
+
+  <!-- Trip form modal -->
+  <div class="modal-overlay" id="trip-modal" style="display:none">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h3 id="modal-title">New Trip</h3>
+        <button class="modal-close" id="modal-close-btn" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="trip-id" />
+        <div class="form-group">
+          <label for="trip-name">Trip Name *</label>
+          <input type="text" id="trip-name" placeholder="e.g. Summer in Japan" maxlength="80" />
+        </div>
+        <div class="form-group">
+          <label for="trip-destination">Destination</label>
+          <input type="text" id="trip-destination" placeholder="e.g. Tokyo, Kyoto" maxlength="120" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="trip-start">Start Date</label>
+            <input type="date" id="trip-start" />
+          </div>
+          <div class="form-group">
+            <label for="trip-end">End Date</label>
+            <input type="date" id="trip-end" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="trip-status">Status</label>
+          <select id="trip-status">
+            <option value="planning">Planning</option>
+            <option value="booked">Booked</option>
+            <option value="ongoing">Ongoing</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="trip-notes">Notes</label>
+          <textarea id="trip-notes" placeholder="Packing list, ideas, reminders…"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="modal-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="modal-save-btn">Save Trip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Firebase SDK (v9 compat – loaded via CDN, no build step)
+  ════════════════════════════════════════════════════════════ -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────
+    // FIREBASE CONFIGURATION
+    // Replace the placeholder values below with your own project's
+    // credentials from the Firebase Console:
+    //   https://console.firebase.google.com → Project Settings → Your apps
+    // ─────────────────────────────────────────────────────────────
+    const firebaseConfig = {
+      apiKey:            "YOUR_API_KEY",
+      authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId:         "YOUR_PROJECT_ID",
+      storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId:             "YOUR_APP_ID"
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    // Initialise Firebase
+    // ─────────────────────────────────────────────────────────────
+    firebase.initializeApp(firebaseConfig);
+    const auth      = firebase.auth();
+    const db        = firebase.firestore();
+    const provider  = new firebase.auth.GoogleAuthProvider();
+
+    // ─────────────────────────────────────────────────────────────
+    // DOM references
+    // ─────────────────────────────────────────────────────────────
+    const $loading      = document.getElementById('loading');
+    const $authScreen   = document.getElementById('auth-screen');
+    const $appShell     = document.getElementById('app-shell');
+    const $loginBtn     = document.getElementById('login-btn');
+    const $logoutBtn    = document.getElementById('logout-btn');
+    const $userAvatar   = document.getElementById('user-avatar');
+    const $userName     = document.getElementById('user-name');
+    const $tripsGrid    = document.getElementById('trips-grid');
+    const $emptyState   = document.getElementById('empty-state');
+    const $newTripBtn   = document.getElementById('new-trip-btn');
+    const $tripModal    = document.getElementById('trip-modal');
+    const $modalTitle   = document.getElementById('modal-title');
+    const $modalClose   = document.getElementById('modal-close-btn');
+    const $modalCancel  = document.getElementById('modal-cancel-btn');
+    const $modalSave    = document.getElementById('modal-save-btn');
+    const $tripId       = document.getElementById('trip-id');
+    const $tripName     = document.getElementById('trip-name');
+    const $tripDest     = document.getElementById('trip-destination');
+    const $tripStart    = document.getElementById('trip-start');
+    const $tripEnd      = document.getElementById('trip-end');
+    const $tripStatus   = document.getElementById('trip-status');
+    const $tripNotes    = document.getElementById('trip-notes');
+    const $toast        = document.getElementById('toast');
+
+    // ─────────────────────────────────────────────────────────────
+    // Auth state listener
+    // ─────────────────────────────────────────────────────────────
+    let unsubscribeTrips = null;
+
+    auth.onAuthStateChanged(user => {
+      $loading.style.display = 'none';
+      if (user) {
+        $userAvatar.src = user.photoURL || '';
+        $userName.textContent = user.displayName || user.email;
+        $authScreen.style.display = 'none';
+        $appShell.style.display   = 'flex';
+        listenToTrips(user.uid);
+      } else {
+        if (unsubscribeTrips) { unsubscribeTrips(); unsubscribeTrips = null; }
+        $appShell.style.display   = 'none';
+        $authScreen.style.display = 'flex';
+        $tripsGrid.innerHTML = '';
+      }
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Sign in / Sign out
+    // ─────────────────────────────────────────────────────────────
+    $loginBtn.addEventListener('click', () => {
+      auth.signInWithPopup(provider).catch(err => showToast(err.message, true));
+    });
+
+    $logoutBtn.addEventListener('click', () => {
+      auth.signOut();
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Firestore – real-time trip listener
+    // ─────────────────────────────────────────────────────────────
+    function tripsRef(uid) {
+      return db.collection('users').doc(uid).collection('trips');
+    }
+
+    function listenToTrips(uid) {
+      unsubscribeTrips = tripsRef(uid)
+        .orderBy('createdAt', 'desc')
+        .onSnapshot(snapshot => {
+          const trips = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          renderTrips(trips);
+        }, err => showToast('Error loading trips: ' + err.message, true));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Render trips
+    // ─────────────────────────────────────────────────────────────
+    const statusColors = {
+      planning:  'linear-gradient(90deg,#4299e1,#63b3ed)',
+      booked:    'linear-gradient(90deg,#48bb78,#68d391)',
+      ongoing:   'linear-gradient(90deg,#ed8936,#f6ad55)',
+      completed: 'linear-gradient(90deg,#9f7aea,#b794f4)',
+    };
+
+    function formatDateRange(start, end) {
+      if (!start && !end) return '';
+      const fmt = d => d ? new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+      return start && end ? `${fmt(start)} → ${fmt(end)}` : fmt(start || end);
+    }
+
+    function renderTrips(trips) {
+      if (trips.length === 0) {
+        $emptyState.style.display = 'block';
+        $tripsGrid.innerHTML = '';
+        return;
+      }
+      $emptyState.style.display = 'none';
+
+      $tripsGrid.innerHTML = trips.map(t => `
+        <div class="trip-card" data-id="${esc(t.id)}">
+          <div class="trip-card-banner" style="background:${statusColors[t.status] || statusColors.planning}"></div>
+          <div class="trip-card-body">
+            <div class="trip-card-title">${esc(t.name)}</div>
+            <div class="trip-card-dates">${t.destination ? '📍 ' + esc(t.destination) + '&ensp;' : ''}${formatDateRange(t.startDate, t.endDate)}</div>
+            <div class="trip-card-note">${esc(t.notes || '')}</div>
+          </div>
+          <div class="trip-card-footer">
+            <button class="btn-sm btn-edit"   data-id="${esc(t.id)}" data-action="edit">Edit</button>
+            <button class="btn-sm btn-delete" data-id="${esc(t.id)}" data-action="delete">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Event delegation for card actions
+    $tripsGrid.addEventListener('click', e => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const { id, action } = btn.dataset;
+      if (action === 'edit')   openModal(id);
+      if (action === 'delete') deleteTrip(id);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Modal helpers
+    // ─────────────────────────────────────────────────────────────
+    function openModal(tripId) {
+      clearModal();
+      if (tripId) {
+        // Load existing trip into form
+        const card = document.querySelector(`.trip-card[data-id="${tripId}"]`);
+        const uid  = auth.currentUser.uid;
+        tripsRef(uid).doc(tripId).get().then(doc => {
+          if (!doc.exists) return;
+          const t = doc.data();
+          $tripId.value        = tripId;
+          $tripName.value      = t.name        || '';
+          $tripDest.value      = t.destination || '';
+          $tripStart.value     = t.startDate   || '';
+          $tripEnd.value       = t.endDate     || '';
+          $tripStatus.value    = t.status      || 'planning';
+          $tripNotes.value     = t.notes       || '';
+          $modalTitle.textContent = 'Edit Trip';
+        });
+      } else {
+        $modalTitle.textContent = 'New Trip';
+      }
+      $tripModal.style.display = 'flex';
+      setTimeout(() => $tripName.focus(), 50);
+    }
+
+    function closeModal() {
+      $tripModal.style.display = 'none';
+      clearModal();
+    }
+
+    function clearModal() {
+      $tripId.value = $tripName.value = $tripDest.value =
+      $tripStart.value = $tripEnd.value = $tripNotes.value = '';
+      $tripStatus.value = 'planning';
+    }
+
+    $newTripBtn.addEventListener('click', () => openModal(null));
+    $modalClose.addEventListener('click', closeModal);
+    $modalCancel.addEventListener('click', closeModal);
+    $tripModal.addEventListener('click', e => { if (e.target === $tripModal) closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    // ─────────────────────────────────────────────────────────────
+    // Save trip (create or update)
+    // ─────────────────────────────────────────────────────────────
+    $modalSave.addEventListener('click', async () => {
+      const name = $tripName.value.trim();
+      if (!name) { $tripName.focus(); showToast('Trip name is required'); return; }
+
+      const uid  = auth.currentUser.uid;
+      const id   = $tripId.value;
+      const data = {
+        name,
+        destination: $tripDest.value.trim(),
+        startDate:   $tripStart.value  || null,
+        endDate:     $tripEnd.value    || null,
+        status:      $tripStatus.value,
+        notes:       $tripNotes.value.trim(),
+        updatedAt:   firebase.firestore.FieldValue.serverTimestamp(),
+      };
+
+      try {
+        if (id) {
+          await tripsRef(uid).doc(id).update(data);
+          showToast('Trip updated ✓');
+        } else {
+          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await tripsRef(uid).add(data);
+          showToast('Trip created ✓');
+        }
+        closeModal();
+      } catch (err) {
+        showToast('Save failed: ' + err.message, true);
+      }
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Delete trip
+    // ─────────────────────────────────────────────────────────────
+    async function deleteTrip(id) {
+      if (!confirm('Delete this trip?')) return;
+      try {
+        await tripsRef(auth.currentUser.uid).doc(id).delete();
+        showToast('Trip deleted');
+      } catch (err) {
+        showToast('Delete failed: ' + err.message, true);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Toast notification
+    // ─────────────────────────────────────────────────────────────
+    let toastTimer;
+    function showToast(msg, isError = false) {
+      $toast.textContent = msg;
+      $toast.style.background = isError ? '#c53030' : '#2d3748';
+      $toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $toast.classList.remove('show'), 3000);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // HTML-escape helper (prevent XSS from stored data)
+    // ─────────────────────────────────────────────────────────────
+    function esc(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>
