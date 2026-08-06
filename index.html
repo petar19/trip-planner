@@ -13,11 +13,12 @@
     --moss:#5E7A57; --moss-soft:#E9EFE4; --gold:#B8933C;
   }
   *{box-sizing:border-box;}
-  body{margin:0; background:var(--paper); color:var(--ink); font-family:'Inter',sans-serif; font-size:15.5px; line-height:1.55; padding-bottom:100px;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:'Inter',sans-serif; font-size:15.5px; line-height:1.55;}
   h1,h2,h3,h4{font-family:'Fraunces',serif; font-weight:600; margin:0 0 .3em;}
   a{color:var(--harbor);}
   .mono{font-family:'JetBrains Mono',monospace; font-size:.85em;}
   input,textarea,select,button{font-family:'Inter',sans-serif;}
+  .hidden{display:none !important;}
 
   /* Auth screen */
   #auth-screen{min-height:100vh; display:flex; align-items:center; justify-content:center; background:#1C2B39;}
@@ -35,63 +36,78 @@
   header.hero .left h1{font-size:1.5rem; color:#FBF9F3; margin:0;}
   header.hero .left p{color:#9FB0B8; font-size:.8rem; margin:2px 0 0;}
   header.hero .right{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+
   select#trip-select, header.hero button{
     font-family:'Inter',sans-serif; font-size:.82rem; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
     background:rgba(255,255,255,.08); color:#F2EFE6; cursor:pointer;
   }
   header.hero button.primary{background:#F2EFE6; color:var(--ink); border-color:transparent;}
 
+  main{max-width:980px; margin:0 auto; padding:36px 20px;}
+  .card{background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin-bottom:16px;}
+  .card h3{font-size:1.1rem;}
+  .card .mono{color:var(--ink-soft);}
+  .tag{display:inline-block; font-size:.76rem; font-weight:600; padding:3px 10px; border-radius:20px; background:var(--harbor-soft); color:var(--harbor); margin:0 6px 6px 0;}
+  .empty-state{text-align:center; padding:60px 20px; color:var(--ink-soft);}
+
+  /* Modal */
+  .modal-backdrop{position:fixed; inset:0; background:rgba(28,43,57,.5); display:flex; align-items:center; justify-content:center; z-index:100;}
+  .modal-box{background:var(--paper-raised); border-radius:16px; padding:28px 30px; width:420px; max-width:90vw; max-height:85vh; overflow-y:auto;}
+  .modal-box h3{margin-bottom:16px;}
+  .modal-box label{display:block; font-size:.8rem; font-weight:600; color:var(--ink-soft); margin:14px 0 5px;}
+  .modal-box label:first-of-type{margin-top:0;}
+  .modal-box input{width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem;}
+  .modal-box .hint{font-size:.76rem; color:var(--ink-soft); margin-top:4px;}
+  .modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:22px;}
+  .modal-actions button{padding:9px 16px; border-radius:8px; font-weight:600; font-size:.88rem; cursor:pointer;}
+  .modal-actions .btn-cancel{background:transparent; border:1px solid var(--line); color:var(--ink-soft);}
+  .modal-actions .btn-save{background:var(--ink); color:var(--paper); border:none;}
+  .modal-box textarea{width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; min-height:60px; resize:vertical; font-family:'Inter',sans-serif;}
+  .modal-box select{width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem;}
+  .modal-grid{display:grid; grid-template-columns:1fr 1fr; column-gap:16px; row-gap:14px;}
+  .modal-grid label{margin-top:0;}
+  .modal-grid .span-2{grid-column:1 / -1;}
+  @media (max-width:600px){ .modal-grid{grid-template-columns:1fr;} }
+  .field-row-simple{display:flex; gap:12px;}
+  .field-row-simple > div{flex:1;}
+  .link-row{display:flex; gap:8px; margin-top:8px;}
+  .link-row input{flex:1;}
+  .link-row button, #pl-add-link{background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; padding:8px 10px; font-size:.82rem;}
+  #pl-add-link{margin-top:8px;}
+
+  /* Tabs */
   nav.tabs{position:sticky; top:0; z-index:50; background:rgba(246,243,236,.96); backdrop-filter:blur(6px); border-bottom:1px solid var(--line); overflow-x:auto; white-space:nowrap; display:flex; gap:4px; padding:10px 16px;}
   nav.tabs button{font-weight:600; font-size:.82rem; background:transparent; border:1px solid transparent; color:var(--ink-soft); padding:8px 14px; border-radius:20px; cursor:pointer;}
   nav.tabs button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
-
-  main{max-width:980px; margin:0 auto; padding:36px 20px;}
   section.panel{display:none;} section.panel.active{display:block;}
-  .card{background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin-bottom:16px;}
-  .card h3{font-size:1.1rem;}
-  table{width:100%; border-collapse:collapse; font-size:.92rem;}
-  th,td{text-align:left; padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top;}
-  th{font-family:'JetBrains Mono',monospace; font-size:.68rem; text-transform:uppercase; color:var(--ink-soft);}
+
+  /* Places */
+  .place-row{padding:14px 0; border-bottom:1px solid var(--line);} .place-row:last-child{border-bottom:none;}
+  .place-name{font-weight:600; font-size:1.02rem;}
+  .place-meta{color:var(--ink-soft); font-size:.85rem; margin-top:2px;}
+  .want-rating{font-family:'JetBrains Mono',monospace; font-size:.78rem; font-weight:600; color:var(--gold);}
+  .want-rating.main{color:var(--red);}
   .badge{display:inline-block; font-size:.68rem; font-weight:600; padding:2px 8px; border-radius:20px;}
   .b-green{background:var(--moss-soft); color:var(--moss);} .b-yellow{background:var(--mustard-soft); color:#8a6a1f;} .b-red{background:#F6E3DF; color:var(--red);}
-  .stars{color:var(--gold); font-size:.9rem;}
-  .place-row{padding:14px 0; border-bottom:1px solid var(--line);} .place-row:last-child{border-bottom:none;}
-  .place-name{font-weight:600;} .place-meta{color:var(--ink-soft); font-size:.85rem; margin-top:2px;}
-  .stop{border-left:2px dashed var(--line); padding:0 0 20px 18px; margin-left:6px; position:relative;}
-  .stop::before{content:""; position:absolute; left:-7px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--harbor); border:2px solid var(--harbor-soft);}
-  .stop-time{font-family:'JetBrains Mono',monospace; font-size:.72rem; color:var(--harbor); text-transform:uppercase;}
-  .stop h4{font-size:1.02rem; margin:2px 0 4px;}
-  .stop-desc{font-size:.9rem; color:var(--ink-soft);}
-  .stop-alt{font-size:.82rem; background:#F6E3DF; border-radius:8px; padding:7px 11px; margin-top:6px; color:#8a3a30;}
-  .daynav{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;}
-  .daynav button{font-family:'JetBrains Mono',monospace; font-size:.75rem; background:var(--paper-raised); border:1px solid var(--line); color:var(--ink-soft); padding:7px 12px; border-radius:8px; cursor:pointer;}
-  .daynav button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
-  .day-block{display:none;} .day-block.active{display:block;}
-
+  .coords-tag{font-family:'JetBrains Mono',monospace; font-size:.7rem; color:var(--ink-soft); background:var(--paper); border:1px solid var(--line); padding:1px 7px; border-radius:10px;}
+  .source-icon{font-size:.85rem; cursor:default; margin-left:2px;}
+  a.place-link{font-size:.78rem; margin-right:12px;}
+  .place-actions{display:flex; gap:8px; margin-top:8px;}
+  .place-actions button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
   .edit-row{margin-top:10px; border-top:1px dashed var(--line); padding-top:8px;}
-  .edit-check{display:flex; align-items:center; gap:6px; font-size:.78rem; font-weight:600; color:var(--harbor); cursor:pointer; margin-bottom:6px;}
-  .edit-check input{width:15px; height:15px; accent-color:var(--harbor); cursor:pointer;}
-  .js-note{width:100%; min-height:34px; resize:vertical; font-size:.82rem; background:#FBFAF6; border:1px solid var(--line); border-radius:8px; padding:6px 9px;}
-  a.maplink{font-size:.78rem; margin-right:12px;}
-  .empty-state{text-align:center; padding:60px 20px; color:var(--ink-soft);}
-  .empty-state button{margin-top:16px;}
-  textarea.jsonbox{width:100%; min-height:220px; font-family:'JetBrains Mono',monospace; font-size:.78rem; border:1px solid var(--line); border-radius:8px; padding:12px;}
-  #sync-toolbar{position:fixed; bottom:0; left:0; right:0; z-index:60; background:var(--ink); color:#EDE8DA; padding:10px 18px; display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; font-size:.78rem;}
-  #sync-toolbar span{color:#9FB0B8;}
-  .hidden{display:none !important;}
+  .js-place-note{width:100%; min-height:34px; resize:vertical; font-size:.82rem; background:#FBFAF6; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-family:'Inter',sans-serif;}
 
-  /* Documents */
-  .doc-form{display:flex; flex-direction:column; gap:8px; margin-top:10px;}
-  .doc-form input, .doc-form select, .doc-form textarea{padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.88rem;}
-  .doc-card{display:flex; justify-content:space-between; gap:14px; align-items:flex-start;}
-  .doc-card .doc-type{font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--harbor); background:var(--harbor-soft); padding:2px 8px; border-radius:20px; display:inline-block; margin-bottom:6px;}
-  .doc-card .doc-actions{display:flex; gap:8px; flex-shrink:0;}
-  .doc-card .doc-actions button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
-  .doc-chip{display:inline-flex; align-items:center; gap:6px; background:var(--mustard-soft); color:#8a6a1f; font-size:.76rem; font-weight:600; padding:4px 6px 4px 10px; border-radius:20px; margin:0 6px 6px 0;}
-  .doc-chip button{background:none; border:none; cursor:pointer; color:#8a6a1f; font-weight:700; padding:0 2px; font-size:.9rem; line-height:1;}
-  .link-doc-row{display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;}
-  .link-doc-row select{flex:1; min-width:140px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:.8rem;}
-  .link-doc-row button{font-size:.76rem; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
+  /* AI preview checklist */
+  .ai-preview-row{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
+  .ai-preview-row:last-child{border-bottom:none;}
+  .ai-preview-row input[type=checkbox]{margin-top:3px; width:16px; height:16px; accent-color:var(--harbor); cursor:pointer;}
+  .ai-preview-row .place-meta{margin-top:1px;}
+
+  /* Category chips */
+  .cat-picker{display:flex; flex-wrap:wrap; gap:6px;}
+  .cat-chip{font-size:.78rem; font-weight:600; padding:5px 12px; border-radius:20px; border:1px solid var(--line); background:#fff; color:var(--ink-soft); cursor:pointer;}
+  .cat-chip.active{background:var(--harbor); color:#fff; border-color:var(--harbor);}
+  .btn-small{background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; padding:8px 14px; font-size:.85rem; font-weight:600;}
 </style>
 </head>
 <body>
@@ -102,12 +118,6 @@
     <h1>Our Trips</h1>
     <p>Sign in to see and edit your trips.</p>
     <button id="auth-google">Sign in with Google</button>
-    <div style="display:flex; align-items:center; gap:10px; margin:18px 0; color:var(--ink-soft); font-size:.78rem;">
-      <div style="flex:1; height:1px; background:var(--line);"></div>OR<div style="flex:1; height:1px; background:var(--line);"></div>
-    </div>
-    <input type="email" id="auth-email" placeholder="Email" autocomplete="email">
-    <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
-    <button id="auth-submit">Sign in with email</button>
     <div id="auth-error"></div>
   </div>
 </div>
@@ -117,7 +127,7 @@
   <header class="hero">
     <div class="left">
       <h1 id="trip-title">Our Trips</h1>
-      <p id="trip-sub">Pick a trip to get started</p>
+      <p id="trip-sub">Signed in as <span id="user-email"></span></p>
     </div>
     <div class="right">
       <select id="trip-select"><option>Loading trips…</option></select>
@@ -128,14 +138,13 @@
 
   <div id="empty-state" class="empty-state hidden">
     <h3>No trips yet</h3>
-    <p>Start with the Copenhagen plan already built, or create a blank one.</p>
-    <button class="primary" id="btn-load-seed">Load Copenhagen (24–30 Aug 2026) starter trip</button>
+    <p>Create your first trip to get started.</p>
+    <button class="primary" id="btn-new-trip-empty">+ New trip</button>
   </div>
 
   <nav class="tabs hidden" id="tabs">
     <button data-tab="overview" class="active">Overview</button>
     <button data-tab="places">Places</button>
-    <button data-tab="food">Food</button>
     <button data-tab="events">Events</button>
     <button data-tab="days">Day-by-day</button>
     <button data-tab="budget">Budget</button>
@@ -144,51 +153,392 @@
   </nav>
 
   <main id="main-content" class="hidden">
-    <section class="panel active" id="p-overview"><div id="overview-body"></div></section>
-    <section class="panel" id="p-places"><div id="places-list"></div></section>
-    <section class="panel" id="p-food"><div id="food-list"></div></section>
-    <section class="panel" id="p-events"><div id="events-list"></div></section>
-    <section class="panel" id="p-days">
-      <div class="daynav" id="daynav"></div>
-      <div id="day-content"></div>
-    </section>
-    <section class="panel" id="p-budget"><div id="budget-body"></div></section>
-    <section class="panel" id="p-documents">
+    <section class="panel active" id="p-overview">
       <div class="card">
-        <h3>Add a document</h3>
-        <p class="small">Tickets, confirmations, boarding passes — store the reference/confirmation number and a link to the actual file (Google Drive, Dropbox, an email link, whatever you already have it saved as). Then attach it to any place or day-stop from that stop's card.</p>
-        <div class="doc-form">
-          <input id="doc-title" placeholder="Title (e.g. 'Flight ZAG→CPH')">
-          <select id="doc-type">
-            <option>Flight</option><option>Accommodation</option><option>Attraction ticket</option>
-            <option>Restaurant reservation</option><option>Transport</option><option>Other</option>
-          </select>
-          <input id="doc-confirmation" placeholder="Confirmation / booking number (optional)">
-          <input id="doc-url" placeholder="Link to the file (optional)">
-          <textarea id="doc-note" placeholder="Note (optional)" style="min-height:50px;"></textarea>
-          <button class="primary" id="btn-add-doc">Add document</button>
-        </div>
-      </div>
-      <div id="documents-list"></div>
-    </section>
-    <section class="panel" id="p-manage">
-      <div class="card">
-        <h3>Import / replace this trip's content</h3>
-        <p class="small">Paste a full trip JSON (places, days, food, events, budget) — ask Claude to generate one in this shape, paste the result here, and it saves live for both of you.</p>
-        <textarea class="jsonbox" id="import-box" placeholder='{"meta":{...},"places":[...],"days":[...],"food":[...],"events":[...],"budget":[...]}'></textarea>
-        <button class="primary" id="btn-import-save" style="margin-top:10px;">Save to this trip</button>
-        <div id="import-status" style="margin-top:8px; font-size:.85rem;"></div>
-      </div>
-      <div class="card">
-        <h3>Danger zone</h3>
-        <button id="btn-delete-trip" style="background:var(--red); color:white; border:none; padding:10px 16px; border-radius:8px; cursor:pointer; font-weight:600;">Delete this trip</button>
+        <h3 id="tv-name"></h3>
+        <p id="tv-dates" class="mono"></p>
+        <div id="tv-cities"></div>
+        <p id="tv-summary"></p>
+        <button class="btn-small" id="btn-edit-trip">Edit trip details</button>
       </div>
     </section>
+
+    <section class="panel" id="p-places">
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+        <button class="primary" id="btn-add-place">+ Add place</button>
+        <button id="btn-ai-generate" class="btn-small">✨ Generate with AI</button>
+      </div>
+      <div id="cat-filter" class="cat-picker" style="margin-bottom:10px;"></div>
+      <div id="source-filter" class="cat-picker" style="margin-bottom:16px;"></div>
+      <div id="places-list"></div>
+    </section>
+
+    <section class="panel" id="p-events"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-days"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-budget"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-documents"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-manage"><p class="mono">Not built yet.</p></section>
   </main>
 </div>
 
-<div id="sync-toolbar" class="hidden">
-  <span id="sync-status">Connected — changes sync live between signed-in accounts</span>
+<!-- ============ NEW TRIP MODAL ============ -->
+<div id="new-trip-modal" class="modal-backdrop hidden">
+  <div class="modal-box">
+    <h3>New trip</h3>
+    <label for="nt-name">Name <span style="color:var(--red);">*</span></label>
+    <input id="nt-name" placeholder='e.g. "Rome, spring 2027"'>
+    <div class="field-row-simple">
+      <div>
+        <label for="nt-start-date">Start date (optional)</label>
+        <input id="nt-start-date" type="date">
+      </div>
+      <div>
+        <label for="nt-end-date">End date (optional)</label>
+        <input id="nt-end-date" type="date">
+      </div>
+    </div>
+    <label for="nt-cities">Cities (optional)</label>
+    <input id="nt-cities" placeholder='e.g. "Rome, Italy; Florence, Italy"'>
+    <p class="hint">Separate multiple cities with a semicolon, each as "City, Country".</p>
+    <label for="nt-currency">Default currency (optional)</label>
+    <select id="nt-currency"></select>
+    <p class="hint">Used to show converted prices next to place/food costs entered in other currencies.</p>
+    <div id="nt-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="nt-cancel">Cancel</button>
+      <button class="btn-save" id="nt-save">Create trip</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ EDIT TRIP DETAILS MODAL ============ -->
+<div id="edit-trip-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:700px;">
+    <h3>Edit trip details</h3>
+    <div class="modal-grid">
+      <div class="span-2">
+        <label for="et-name">Name <span style="color:var(--red);">*</span></label>
+        <input id="et-name">
+      </div>
+
+      <div>
+        <label for="et-start-date">Start date (optional)</label>
+        <input id="et-start-date" type="date">
+      </div>
+      <div>
+        <label for="et-end-date">End date (optional)</label>
+        <input id="et-end-date" type="date">
+      </div>
+
+      <div>
+        <label for="et-currency">Default currency (optional)</label>
+        <select id="et-currency"></select>
+      </div>
+      <div>
+        <label for="et-num-people">Number of people (optional)</label>
+        <input id="et-num-people" type="number" min="1">
+      </div>
+
+      <div>
+        <label for="et-base-ops">Base of operations (optional)</label>
+        <input id="et-base-ops" placeholder="e.g. hotel name/area">
+      </div>
+      <div>
+        <label for="et-max-steps">Max steps per day (optional)</label>
+        <input id="et-max-steps" type="number" min="0" step="500">
+      </div>
+
+      <div class="span-2">
+        <label>Budget (optional)</label>
+        <div class="field-row-simple">
+          <div>
+            <input id="et-budget-max" type="number" min="0" placeholder="Max">
+          </div>
+          <div>
+            <input id="et-budget-realistic" type="number" min="0" placeholder="Realistic">
+          </div>
+          <div>
+            <input id="et-budget-perday" type="number" min="0" placeholder="Per day">
+          </div>
+        </div>
+        <p class="hint">In the default currency above.</p>
+      </div>
+
+      <div class="span-2">
+        <label>Cities</label>
+        <div id="et-cities-list"></div>
+        <button type="button" class="btn-small" id="et-add-city">+ Add city</button>
+      </div>
+
+      <div class="span-2">
+        <label for="et-summary">Summary (optional)</label>
+        <textarea id="et-summary" placeholder="A short overview of the trip"></textarea>
+      </div>
+
+      <div class="span-2">
+        <label for="et-prefs-freetext">General preferences (optional)</label>
+        <textarea id="et-prefs-freetext" placeholder="Anything not covered by the fields below"></textarea>
+      </div>
+
+      <div class="span-2">
+        <label>Travel methods (optional)</label>
+        <div id="et-travel-methods" class="cat-picker"></div>
+      </div>
+
+      <div class="span-2">
+        <label for="et-want-to-see">Want to see (optional)</label>
+        <textarea id="et-want-to-see" placeholder="One per line — specific named places you already know you want to visit"></textarea>
+      </div>
+
+      <div class="span-2">
+        <label for="et-places-avoid">Places to avoid (optional)</label>
+        <textarea id="et-places-avoid" placeholder="One per line"></textarea>
+      </div>
+
+      <div class="span-2">
+        <label>Categories wanted (optional)</label>
+        <div id="et-catwant-chips" class="cat-picker"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <input id="et-catwant-custom" placeholder="Add custom category" style="flex:1;">
+          <button type="button" id="et-catwant-add" class="btn-small">+ Add</button>
+        </div>
+      </div>
+
+      <div class="span-2">
+        <label>Categories to avoid (optional)</label>
+        <div id="et-catavoid-chips" class="cat-picker"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <input id="et-catavoid-custom" placeholder="Add custom category" style="flex:1;">
+          <button type="button" id="et-catavoid-add" class="btn-small">+ Add</button>
+        </div>
+      </div>
+    </div>
+    <div id="et-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="et-cancel">Cancel</button>
+      <button class="btn-save" id="et-save">Save trip details</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PLACE MODAL ============ -->
+<div id="place-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:700px;">
+    <h3 id="pl-modal-title">Add place</h3>
+    <div class="modal-grid">
+      <div>
+        <label for="pl-name">Name <span style="color:var(--red);">*</span></label>
+        <input id="pl-name" placeholder="e.g. Tivoli Gardens">
+      </div>
+      <div>
+        <label for="pl-city">City (optional)</label>
+        <input id="pl-city" placeholder="e.g. Copenhagen" list="pl-city-list">
+        <datalist id="pl-city-list"></datalist>
+      </div>
+
+      <div>
+        <label for="pl-area">Area (optional)</label>
+        <input id="pl-area" placeholder="e.g. City Centre">
+      </div>
+      <div>
+        <label for="pl-want">Want rating, 1–10 (optional)</label>
+        <input id="pl-want" type="number" min="1" max="10" placeholder="8">
+      </div>
+
+      <div class="span-2">
+        <label>Categories (optional)</label>
+        <div id="pl-cat-chips" class="cat-picker"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <input id="pl-cat-custom" placeholder="Add custom category" list="pl-cat-list" style="flex:1;">
+          <datalist id="pl-cat-list"></datalist>
+          <button type="button" id="pl-cat-add" class="btn-small">+ Add</button>
+        </div>
+      </div>
+
+      <div>
+        <label for="pl-price-amount">Price amount (optional)</label>
+        <input id="pl-price-amount" type="number" step="any" min="0" placeholder="150">
+      </div>
+      <div>
+        <label for="pl-price-currency">Currency</label>
+        <select id="pl-price-currency"></select>
+      </div>
+
+      <div class="span-2 hint" id="pl-price-preview"></div>
+
+      <div class="span-2">
+        <label for="pl-price-note">Price note (optional)</label>
+        <input id="pl-price-note" placeholder='e.g. "per person", "Free", "Pay per stall"'>
+      </div>
+
+      <div>
+        <label for="pl-hours-open">Opens (optional)</label>
+        <input id="pl-hours-open" type="time">
+      </div>
+      <div>
+        <label for="pl-hours-close">Closes (optional)</label>
+        <input id="pl-hours-close" type="time">
+      </div>
+
+      <div>
+        <label for="pl-hours-note">Hours note (optional)</label>
+        <input id="pl-hours-note" placeholder='e.g. "Always", "Guard change ~12:00"'>
+      </div>
+      <div>
+        <label for="pl-certainty">Certainty</label>
+        <select id="pl-certainty">
+          <option value="green">Green — confirmed</option>
+          <option value="yellow">Yellow — likely</option>
+          <option value="red">Red — uncertain</option>
+        </select>
+      </div>
+
+      <div class="span-2">
+        <label for="pl-note">Note (optional)</label>
+        <textarea id="pl-note" placeholder="Anything worth remembering about this place"></textarea>
+      </div>
+
+      <div class="span-2">
+        <label for="pl-wishlist">Wishlist (optional)</label>
+        <textarea id="pl-wishlist" placeholder='One per line — specific things to see/eat here, e.g. "Starry Night painting" or "the burger deluxe"'></textarea>
+      </div>
+
+      <div>
+        <label for="pl-lat">Latitude (optional)</label>
+        <input id="pl-lat" type="number" step="any" placeholder="55.6736">
+      </div>
+      <div>
+        <label for="pl-lng">Longitude (optional)</label>
+        <input id="pl-lng" type="number" step="any" placeholder="12.5681">
+      </div>
+
+      <div class="span-2">
+        <label>Links (optional)</label>
+        <div id="pl-links-list"></div>
+        <button id="pl-add-link" type="button">+ Add link</button>
+      </div>
+    </div>
+    <div id="pl-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="pl-cancel">Cancel</button>
+      <button class="btn-save" id="pl-save">Save place</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ AI GENERATE PLACES MODAL ============ -->
+<div id="ai-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:700px;">
+    <h3>Generate places with AI</h3>
+
+    <div id="ai-step-setup">
+      <div id="ai-no-cities-hint" class="hidden" style="background:var(--mustard-soft); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.85rem;">
+        This trip has no cities set yet. <button type="button" class="btn-small" id="ai-open-edit-trip" style="padding:3px 10px;">Edit trip details</button>
+      </div>
+      <p class="hint" style="margin-bottom:14px;">Prefilled from "Edit trip details" — change anything just for this batch without touching the saved trip settings.</p>
+      <div class="modal-grid">
+        <div>
+          <label for="ai-city">City</label>
+          <select id="ai-city"></select>
+        </div>
+        <div>
+          <label for="ai-count">Roughly how many places</label>
+          <input id="ai-count" type="number" min="1" max="40" value="8">
+        </div>
+
+        <div>
+          <label for="ai-num-people">Number of people (optional)</label>
+          <input id="ai-num-people" type="number" min="1">
+        </div>
+        <div>
+          <label for="ai-base-ops">Base of operations (optional)</label>
+          <input id="ai-base-ops">
+        </div>
+
+        <div class="span-2">
+          <label>Budget (optional)</label>
+          <div class="field-row-simple">
+            <div><input id="ai-budget-max" type="number" min="0" placeholder="Max"></div>
+            <div><input id="ai-budget-realistic" type="number" min="0" placeholder="Realistic"></div>
+            <div><input id="ai-budget-perday" type="number" min="0" placeholder="Per day"></div>
+          </div>
+        </div>
+
+        <div>
+          <label for="ai-max-steps">Max steps per day (optional)</label>
+          <input id="ai-max-steps" type="number" min="0" step="500">
+        </div>
+        <div>
+          <label>Travel methods (optional)</label>
+          <div id="ai-travel-methods" class="cat-picker"></div>
+        </div>
+
+        <div class="span-2">
+          <label for="ai-want-to-see">Want to see (optional)</label>
+          <textarea id="ai-want-to-see" placeholder="One per line"></textarea>
+        </div>
+        <div class="span-2">
+          <label for="ai-places-avoid">Places to avoid (optional)</label>
+          <textarea id="ai-places-avoid" placeholder="One per line"></textarea>
+        </div>
+
+        <div class="span-2">
+          <label>Categories wanted (optional)</label>
+          <div id="ai-catwant-chips" class="cat-picker"></div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <input id="ai-catwant-custom" placeholder="Add custom category" style="flex:1;">
+            <button type="button" id="ai-catwant-add" class="btn-small">+ Add</button>
+          </div>
+        </div>
+        <div class="span-2">
+          <label>Categories to avoid (optional)</label>
+          <div id="ai-catavoid-chips" class="cat-picker"></div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <input id="ai-catavoid-custom" placeholder="Add custom category" style="flex:1;">
+            <button type="button" id="ai-catavoid-add" class="btn-small">+ Add</button>
+          </div>
+        </div>
+
+        <div class="span-2">
+          <label for="ai-freetext">General preferences (optional)</label>
+          <textarea id="ai-freetext"></textarea>
+        </div>
+        <div class="span-2">
+          <label for="ai-prefs">Anything specific to just this batch (optional)</label>
+          <textarea id="ai-prefs" placeholder="e.g. mostly free/outdoor, a couple of good coffee spots, avoid anything touristy"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="ai-cancel-1">Cancel</button>
+        <button class="btn-save" id="ai-build">Generate instructions</button>
+      </div>
+    </div>
+
+    <div id="ai-step-instructions" class="hidden">
+      <label for="ai-instructions">Instructions — copy this to your AI of choice</label>
+      <textarea id="ai-instructions" readonly style="min-height:180px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn-small" id="ai-copy">Copy to clipboard</button>
+        <button type="button" class="btn-small" id="ai-direct-call" disabled title="Requires a server-side AI proxy (Firebase Cloud Function) — not set up yet">Generate via AI directly (coming soon)</button>
+      </div>
+      <label for="ai-response" style="margin-top:20px;">Paste the AI's JSON response here</label>
+      <textarea id="ai-response" placeholder="[ { &quot;name&quot;: ... }, ... ]" style="min-height:140px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div id="ai-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="ai-cancel-2">Cancel</button>
+        <button class="btn-save" id="ai-validate">Validate &amp; preview</button>
+      </div>
+    </div>
+
+    <div id="ai-step-preview" class="hidden">
+      <p class="hint" style="margin-bottom:10px;">Review before importing — likely duplicates are unchecked by default.</p>
+      <div id="ai-preview-list"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="ai-cancel-3">Cancel</button>
+        <button class="btn-save" id="ai-import">Import selected</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ============ FIREBASE SDK ============ -->
@@ -213,16 +563,60 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+db.enablePersistence({synchronizeTabs: true}).catch(err=>{
+  console.warn('Offline persistence not enabled:', err.code);
+});
 
-let currentTripId = null;
-let notesUnsub = null;
-let state = {places:{}, stops:{}, documents:{}};
+// ---------- Currency ----------
+// Best-effort country -> ISO currency code lookup, used to auto-suggest a place's
+// price currency from its city. Not exhaustive — falls back to manual selection.
+const CURRENCY_BY_COUNTRY = {
+  denmark:'DKK', sweden:'SEK', norway:'NOK', finland:'EUR', iceland:'ISK',
+  germany:'EUR', france:'EUR', italy:'EUR', spain:'EUR', portugal:'EUR',
+  netherlands:'EUR', belgium:'EUR', austria:'EUR', switzerland:'CHF', ireland:'EUR',
+  'united kingdom':'GBP', uk:'GBP', poland:'PLN', 'czech republic':'CZK', czechia:'CZK',
+  hungary:'HUF', greece:'EUR', croatia:'EUR', slovenia:'EUR', slovakia:'EUR',
+  romania:'RON', bulgaria:'BGN', estonia:'EUR', latvia:'EUR', lithuania:'EUR',
+  luxembourg:'EUR', malta:'EUR', cyprus:'EUR', turkey:'TRY', ukraine:'UAH',
+  serbia:'RSD', 'bosnia and herzegovina':'BAM', albania:'ALL', 'north macedonia':'MKD', montenegro:'EUR',
+  'united states':'USD', usa:'USD', canada:'CAD', mexico:'MXN', brazil:'BRL',
+  argentina:'ARS', chile:'CLP', colombia:'COP', peru:'PEN', 'costa rica':'CRC',
+  japan:'JPY', china:'CNY', 'south korea':'KRW', thailand:'THB', vietnam:'VND',
+  indonesia:'IDR', malaysia:'MYR', singapore:'SGD', philippines:'PHP', india:'INR',
+  israel:'ILS', 'united arab emirates':'AED', uae:'AED', 'saudi arabia':'SAR', 'hong kong':'HKD', taiwan:'TWD',
+  australia:'AUD', 'new zealand':'NZD',
+  egypt:'EGP', morocco:'MAD', 'south africa':'ZAR', kenya:'KES', tanzania:'TZS'
+};
+const CURRENCY_CODES = [...new Set(Object.values(CURRENCY_BY_COUNTRY))].sort();
 
-// ---------- Auth wiring ----------
-document.getElementById('auth-submit').addEventListener('click', signIn);
-document.getElementById('auth-password').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
+function currencyForCountry(country){
+  return CURRENCY_BY_COUNTRY[(country||'').trim().toLowerCase()] || null;
+}
+function populateCurrencySelect(sel, withBlank){
+  sel.innerHTML = (withBlank ? '<option value="">No default (skip conversion)</option>' : '')
+    + CURRENCY_CODES.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+populateCurrencySelect(document.getElementById('nt-currency'), true);
+
+let ratesCache = {};
+async function getRate(from, to){
+  if(from === to) return 1;
+  const key = from+'_'+to;
+  if(key in ratesCache) return ratesCache[key];
+  try{
+    const res = await fetch(`https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`);
+    const data = await res.json();
+    ratesCache[key] = data.rates?.[to] ?? null;
+  }catch(err){
+    console.warn('Currency conversion failed:', err);
+    ratesCache[key] = null;
+  }
+  return ratesCache[key];
+}
+
 document.getElementById('auth-google').addEventListener('click', signInWithGoogle);
 document.getElementById('btn-signout').addEventListener('click', ()=>auth.signOut());
+
 function signInWithGoogle(){
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
@@ -237,30 +631,28 @@ function signInWithGoogle(){
     }
   });
 }
-function signIn(){
-  const email = document.getElementById('auth-email').value.trim();
-  const pw = document.getElementById('auth-password').value;
-  const errEl = document.getElementById('auth-error');
-  errEl.textContent = '';
-  auth.signInWithEmailAndPassword(email, pw).catch(err=>{ errEl.textContent = err.message; });
-}
 
+let currentUser = null;
 auth.onAuthStateChanged(user=>{
+  currentUser = user;
   if(user){
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    document.getElementById('sync-toolbar').classList.remove('hidden');
+    document.getElementById('user-email').textContent = user.email;
     loadTripIndex();
   }else{
     document.getElementById('auth-screen').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
-    document.getElementById('sync-toolbar').classList.add('hidden');
   }
 });
 
 // ---------- Trip index (small, listed live) ----------
+let currentTripId = null;
+let tripIndexUnsub = null;
+
 function loadTripIndex(){
-  db.collection('trips').orderBy('updatedAt','desc').onSnapshot(snap=>{
+  if(tripIndexUnsub) tripIndexUnsub();
+  tripIndexUnsub = db.collection('trips').orderBy('updatedAt','desc').onSnapshot(snap=>{
     const sel = document.getElementById('trip-select');
     const empty = document.getElementById('empty-state');
     if(snap.empty){
@@ -268,6 +660,7 @@ function loadTripIndex(){
       empty.classList.remove('hidden');
       document.getElementById('tabs').classList.add('hidden');
       document.getElementById('main-content').classList.add('hidden');
+      currentTripId = null;
       return;
     }
     empty.classList.add('hidden');
@@ -276,13 +669,14 @@ function loadTripIndex(){
       const d = doc.data();
       const opt = document.createElement('option');
       opt.value = doc.id;
-      opt.textContent = `${d.name || doc.id} (${d.dateRange || ''})`;
+      const range = formatDateRange(d.startDate, d.endDate);
+      opt.textContent = range ? `${d.name || doc.id} (${range})` : (d.name || doc.id);
       sel.appendChild(opt);
     });
-    if(!currentTripId) loadTrip(snap.docs[0].id);
+    if(!currentTripId || !snap.docs.some(d=>d.id===currentTripId)) loadTrip(snap.docs[0].id);
   }, err=>{
     if(err.code === 'permission-denied'){
-      alert('Your Google account isn\'t on the allow-list for this app yet. Ask whoever set up Firebase to add your email to the Firestore rules.');
+      alert('Your account isn\'t on the allow-list for this app yet. Ask whoever set up Firebase to add your email to config/allowlist.');
       auth.signOut();
     }else{
       console.error(err);
@@ -291,289 +685,284 @@ function loadTripIndex(){
 }
 document.getElementById('trip-select').addEventListener('change', e=>loadTrip(e.target.value));
 
-document.getElementById('btn-new-trip').addEventListener('click', async ()=>{
-  const name = prompt('Trip name (e.g. "Rome, spring 2027")');
-  if(!name) return;
-  const dateRange = prompt('Dates (e.g. "12–18 Apr 2027")') || '';
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatDateRange(startIso, endIso){
+  if(!startIso && !endIso) return '';
+  const parse = iso => { const [y,m,d] = iso.split('-').map(Number); return {y,m,d}; };
+  if(startIso && endIso){
+    const s = parse(startIso), e = parse(endIso);
+    if(s.y===e.y && s.m===e.m) return `${s.d}–${e.d} ${MONTH_ABBR[s.m-1]} ${s.y}`;
+    if(s.y===e.y) return `${s.d} ${MONTH_ABBR[s.m-1]} – ${e.d} ${MONTH_ABBR[e.m-1]} ${s.y}`;
+    return `${s.d} ${MONTH_ABBR[s.m-1]} ${s.y} – ${e.d} ${MONTH_ABBR[e.m-1]} ${e.y}`;
+  }
+  const one = parse(startIso || endIso);
+  return `${one.d} ${MONTH_ABBR[one.m-1]} ${one.y}`;
+}
+
+// City input like "Copenhagen, Denmark; Malmö, Sweden" -> index strings + meta objects
+function parseCities(input){
+  const parts = input.split(';').map(s=>s.trim()).filter(Boolean);
+  const index = [];
+  const meta = [];
+  parts.forEach(p=>{
+    const [name, country] = p.split(',').map(s=>s.trim());
+    index.push(country ? `${name}, ${country}` : name);
+    meta.push({name, country: country||'', dateRangeWithinTrip: ''});
+  });
+  return {index, meta};
+}
+
+function openNewTripModal(){
+  document.getElementById('nt-name').value = '';
+  document.getElementById('nt-start-date').value = '';
+  document.getElementById('nt-end-date').value = '';
+  document.getElementById('nt-cities').value = '';
+  document.getElementById('nt-currency').value = '';
+  document.getElementById('nt-error').textContent = '';
+  document.getElementById('new-trip-modal').classList.remove('hidden');
+  document.getElementById('nt-name').focus();
+}
+function closeNewTripModal(){
+  document.getElementById('new-trip-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-trip').addEventListener('click', openNewTripModal);
+document.getElementById('btn-new-trip-empty').addEventListener('click', openNewTripModal);
+document.getElementById('nt-cancel').addEventListener('click', closeNewTripModal);
+document.getElementById('new-trip-modal').addEventListener('click', e=>{
+  if(e.target.id === 'new-trip-modal') closeNewTripModal();
+});
+
+function emptyPreferences(){
+  return {
+    freeText: '', numPeople: null, baseOfOperations: '',
+    budget: { max: null, realistic: null, perDay: null },
+    maxStepsPerDay: null, travelMethods: [],
+    wantToSee: [], placesToAvoid: [], catWant: [], catAvoid: []
+  };
+}
+
+async function createTrip(){
+  const name = document.getElementById('nt-name').value.trim();
+  const errEl = document.getElementById('nt-error');
+  if(!name){ errEl.textContent = 'Name is required.'; return; }
+  const startDate = document.getElementById('nt-start-date').value || null;
+  const endDate = document.getElementById('nt-end-date').value || null;
+  const citiesInput = document.getElementById('nt-cities').value.trim();
+  const {index: citiesIndex, meta: citiesMeta} = parseCities(citiesInput);
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '-' + Date.now().toString(36);
-  await db.collection('trips').doc(slug).set({name, dateRange, updatedAt: Date.now()});
-  await db.collection('tripData').doc(slug).set({meta:{name, dateRange, summary:'', ceiling:''}, places:[], days:[], food:[], events:[], budget:[]});
-  await db.collection('tripNotes').doc(slug).set({places:{}, stops:{}, documents:{}});
-  loadTrip(slug);
-});
 
-document.getElementById('btn-load-seed').addEventListener('click', async ()=>{
-  const slug = 'copenhagen-aug-2026';
-  await db.collection('trips').doc(slug).set({name:'Copenhagen', dateRange:'24–30 Aug 2026', updatedAt: Date.now()});
-  await db.collection('tripData').doc(slug).set(SEED_COPENHAGEN);
-  await db.collection('tripNotes').doc(slug).set({places:{}, stops:{}, documents:{}});
-  loadTrip(slug);
-});
+  await db.collection('trips').doc(slug).set({
+    name, startDate, endDate, cities: citiesIndex,
+    ownerEmail: currentUser.email,
+    participants: [currentUser.email],
+    updatedAt: Date.now()
+  });
+  const defaultCurrency = document.getElementById('nt-currency').value;
+  await db.collection('tripData').doc(slug).set({
+    meta: { name, startDate, endDate, cities: citiesMeta, summary: '', defaultCurrency, preferences: emptyPreferences() },
+    places: [], routes: [], days: [], events: [], budget: []
+  });
+  await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
 
-document.getElementById('btn-delete-trip').addEventListener('click', async ()=>{
-  if(!currentTripId) return;
-  if(!confirm('Delete this trip permanently for both of you?')) return;
-  await db.collection('trips').doc(currentTripId).delete();
-  await db.collection('tripData').doc(currentTripId).delete();
-  await db.collection('tripNotes').doc(currentTripId).delete();
-  currentTripId = null;
-});
+  closeNewTripModal();
+  loadTrip(slug);
+}
+document.getElementById('nt-save').addEventListener('click', createTrip);
 
 // ---------- Load a trip ----------
 let tripData = null;
+let tripNotes = { places: {}, routeStops: {}, documents: {} };
+let notesUnsub = null;
+
 async function loadTrip(slug){
   currentTripId = slug;
   document.getElementById('trip-select').value = slug;
   const doc = await db.collection('tripData').doc(slug).get();
-  tripData = doc.exists ? doc.data() : {meta:{}, places:[], days:[], food:[], events:[], budget:[]};
+  tripData = doc.exists ? doc.data() : { meta:{}, places:[], routes:[], days:[], events:[], budget:[] };
+
+  document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('tabs').classList.remove('hidden');
   document.getElementById('main-content').classList.remove('hidden');
   document.getElementById('trip-title').textContent = tripData.meta?.name || slug;
-  document.getElementById('trip-sub').textContent = tripData.meta?.dateRange || '';
-  document.getElementById('import-box').value = '';
-  document.getElementById('import-status').textContent = '';
+
+  document.getElementById('tv-name').textContent = tripData.meta?.name || slug;
+  document.getElementById('tv-dates').textContent = formatDateRange(tripData.meta?.startDate, tripData.meta?.endDate)
+    || (tripData.meta?.cities||[]).map(c=>c.dateRangeWithinTrip).filter(Boolean).join(' · ');
+  document.getElementById('tv-cities').innerHTML = (tripData.meta?.cities||[])
+    .map(c=>`<span class="tag">${c.name}${c.country ? ', '+c.country : ''}</span>`).join('');
+  document.getElementById('tv-summary').textContent = tripData.meta?.summary || 'No summary yet.';
 
   if(notesUnsub) notesUnsub();
   notesUnsub = db.collection('tripNotes').doc(slug).onSnapshot(snap=>{
-    state = snap.exists ? snap.data() : {places:{}, stops:{}, documents:{}};
-    if(!state.places) state.places = {};
-    if(!state.stops) state.stops = {};
-    if(!state.documents) state.documents = {};
-    renderAll();
+    const d = snap.exists ? snap.data() : {};
+    tripNotes = { places: d.places||{}, routeStops: d.routeStops||{}, documents: d.documents||{} };
+    renderPlaces();
   });
 }
 
-// ---------- Render helpers ----------
-const mapLink = q => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-const imgLink = q => `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`;
-const dirLink = (from,to) => `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to)}&travelmode=walking`;
-function slugify(s){ return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
-function starsHtml(n){ n=n||0; return '★'.repeat(n)+'☆'.repeat(5-n); }
-function certBadge(c){ const m={green:['b-green','🟢'],yellow:['b-yellow','🟡'],red:['b-red','🔴']}; const x=m[c]||m.yellow; return `<span class="badge ${x[0]}">${x[1]}</span>`; }
+// ---------- Edit trip details ----------
+function addCityRow(name, country){
+  const row = document.createElement('div');
+  row.className = 'link-row';
+  row.innerHTML = `<input class="et-city-name" placeholder="City" value="${name||''}">
+    <input class="et-city-country" placeholder="Country" value="${country||''}">
+    <button type="button" class="pl-link-remove">×</button>`;
+  row.querySelector('.pl-link-remove').addEventListener('click', ()=>row.remove());
+  document.getElementById('et-cities-list').appendChild(row);
+}
+document.getElementById('et-add-city').addEventListener('click', ()=>addCityRow());
 
-function editControls(kind, id){
-  const entry = (state[kind] && state[kind][id]) || {done:false, note:'', linkedDocs:[]};
-  const linkedIds = entry.linkedDocs || [];
-  const allDocs = state.documents || {};
-  const chips = linkedIds.map(docId=>{
-    const d = allDocs[docId];
-    if(!d) return '';
-    const inner = d.url ? `<a href="${d.url}" target="_blank" style="color:inherit;">${d.title}</a>` : d.title;
-    return `<span class="doc-chip">📎 ${inner}<button class="js-unlink-doc" data-kind="${kind}" data-id="${id}" data-docid="${docId}" title="Unlink">×</button></span>`;
-  }).join('');
-  const unlinkedOptions = Object.entries(allDocs).filter(([docId])=>!linkedIds.includes(docId))
-    .map(([docId,d])=>`<option value="${docId}">${d.title}</option>`).join('');
-  return `<div class="edit-row" data-kind="${kind}" data-id="${id}">
-    <label class="edit-check"><input type="checkbox" class="js-done" ${entry.done?'checked':''}> Done / booked</label>
-    <textarea class="js-note" placeholder="Note (times, who's paying, confirmation #...)">${(entry.note||'').replace(/</g,'&lt;')}</textarea>
-    <div>${chips}</div>
-    <div class="link-doc-row">
-      <select class="js-doc-picker" data-kind="${kind}" data-id="${id}">
-        <option value="">${Object.keys(allDocs).length ? 'Link an existing document…' : 'No documents yet'}</option>
-        ${unlinkedOptions}
-      </select>
-      <button class="js-link-doc-btn" data-kind="${kind}" data-id="${id}">Link</button>
-      <button class="js-quick-add-doc" data-kind="${kind}" data-id="${id}">+ New &amp; link</button>
-    </div>
-  </div>`;
-}
-
-async function setDone(kind, id, val){
-  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{done:val}}}, {merge:true});
-}
-async function setNote(kind, id, val){
-  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{note:val}}}, {merge:true});
-}
-async function linkDocTo(kind, id, docId){
-  if(!docId) return;
-  const current = (state[kind]?.[id]?.linkedDocs) || [];
-  if(current.includes(docId)) return;
-  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{linkedDocs:[...current, docId]}}}, {merge:true});
-}
-async function unlinkDocFrom(kind, id, docId){
-  const current = (state[kind]?.[id]?.linkedDocs) || [];
-  await db.collection('tripNotes').doc(currentTripId).set({[kind]:{[id]:{linkedDocs: current.filter(d=>d!==docId)}}}, {merge:true});
-}
-async function addDocument(doc){
-  const docId = 'doc-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-  await db.collection('tripNotes').doc(currentTripId).set({documents:{[docId]:{...doc, createdAt:Date.now()}}}, {merge:true});
-  return docId;
-}
-async function deleteDocument(docId){
-  if(!confirm('Delete this document? It will be unlinked from everywhere it\'s attached.')) return;
-  await db.collection('tripNotes').doc(currentTripId).update({[`documents.${docId}`]: firebase.firestore.FieldValue.delete()});
-  // best-effort cleanup of dangling links
-  ['places','stops'].forEach(kind=>{
-    Object.entries(state[kind]||{}).forEach(([id, entry])=>{
-      if((entry.linkedDocs||[]).includes(docId)) unlinkDocFrom(kind, id, docId);
-    });
-  });
-}
-
-document.body.addEventListener('change', e=>{
-  if(e.target.classList.contains('js-done')){
-    const w = e.target.closest('.edit-row');
-    setDone(w.dataset.kind, w.dataset.id, e.target.checked);
-  }
-});
-document.body.addEventListener('input', e=>{
-  if(e.target.classList.contains('js-note')){
-    const w = e.target.closest('.edit-row');
-    setNote(w.dataset.kind, w.dataset.id, e.target.value);
-  }
-});
-document.body.addEventListener('click', e=>{
-  if(e.target.classList.contains('js-unlink-doc')){
-    unlinkDocFrom(e.target.dataset.kind, e.target.dataset.id, e.target.dataset.docid);
-  }
-  if(e.target.classList.contains('js-link-doc-btn')){
-    const row = e.target.closest('.link-doc-row');
-    const sel = row.querySelector('.js-doc-picker');
-    linkDocTo(e.target.dataset.kind, e.target.dataset.id, sel.value);
-  }
-  if(e.target.classList.contains('js-quick-add-doc')){
-    const title = prompt('Document title (e.g. "Flight ZAG→CPH" or "Tivoli tickets")');
-    if(!title) return;
-    const url = prompt('Link to the file (optional — Google Drive, email, etc.)') || '';
-    addDocument({title, type:'Other', confirmationNumber:'', url, note:''}).then(docId=>{
-      linkDocTo(e.target.dataset.kind, e.target.dataset.id, docId);
-    });
-  }
-  if(e.target.classList.contains('js-delete-doc')){
-    deleteDocument(e.target.dataset.docid);
-  }
-  if(e.target.classList.contains('js-edit-doc')){
-    const docId = e.target.dataset.docid;
-    const d = state.documents[docId];
-    const title = prompt('Title', d.title); if(title===null) return;
-    const confirmationNumber = prompt('Confirmation / booking number', d.confirmationNumber||'');
-    const url = prompt('Link to file', d.url||'');
-    const note = prompt('Note', d.note||'');
-    db.collection('tripNotes').doc(currentTripId).set({documents:{[docId]:{title, confirmationNumber, url, note}}}, {merge:true});
-  }
-});
-
-document.getElementById('btn-add-doc').addEventListener('click', ()=>{
-  const title = document.getElementById('doc-title').value.trim();
-  if(!title){ alert('Give it a title first.'); return; }
-  addDocument({
-    title,
-    type: document.getElementById('doc-type').value,
-    confirmationNumber: document.getElementById('doc-confirmation').value.trim(),
-    url: document.getElementById('doc-url').value.trim(),
-    note: document.getElementById('doc-note').value.trim()
-  });
-  ['doc-title','doc-confirmation','doc-url','doc-note'].forEach(id=>document.getElementById(id).value='');
-});
-
-function renderAll(){
-  renderOverview(); renderPlaces(); renderFood(); renderEvents(); renderDays(); renderBudget(); renderDocuments();
-}
-
-function renderDocuments(){
-  const el = document.getElementById('documents-list');
-  const docs = Object.entries(state.documents||{}).sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0));
-  if(!docs.length){ el.innerHTML = '<p class="small">No documents added yet — add your flight, hotel, and ticket confirmations above, then attach them to specific places or day-stops.</p>'; return; }
-  el.innerHTML = docs.map(([docId,d])=>`
-    <div class="card doc-card">
-      <div>
-        <span class="doc-type">${d.type||'Other'}</span>
-        <div class="place-name">${d.title}</div>
-        ${d.confirmationNumber?`<div class="place-meta mono">Confirmation: ${d.confirmationNumber}</div>`:''}
-        ${d.note?`<div class="place-meta">${d.note}</div>`:''}
-        ${d.url?`<a class="maplink" href="${d.url}" target="_blank">Open file ↗</a>`:''}
-      </div>
-      <div class="doc-actions">
-        <button class="js-edit-doc" data-docid="${docId}">Edit</button>
-        <button class="js-delete-doc" data-docid="${docId}">Delete</button>
-      </div>
-    </div>`).join('');
-}
-
-function renderOverview(){
-  const m = tripData.meta || {};
-  document.getElementById('overview-body').innerHTML = `
-    <div class="card"><h3>${m.name||''}</h3><p>${m.summary||'No summary yet — add one via the Manage tab.'}</p>
-    ${m.ceiling?`<p class="mono">Budget ceiling: ${m.ceiling}</p>`:''}</div>`;
-}
-
-function renderPlaces(){
-  const el = document.getElementById('places-list');
-  el.innerHTML = '';
-  (tripData.places||[]).slice().sort((a,b)=>(b.stars||0)-(a.stars||0)).forEach((p,i)=>{
-    const id = slugify(p.name);
-    const row = document.createElement('div');
-    row.className = 'place-row';
-    row.innerHTML = `
-      <div class="place-name">${i+1}. ${p.name} <span class="stars">${starsHtml(p.stars)}</span> ${certBadge(p.certainty)}</div>
-      <div class="place-meta">${p.area||''} · ${p.price||''} · ${p.hours||''}</div>
-      <div class="place-meta">${p.note||''}</div>
-      <div><a class="maplink" href="${mapLink(p.q||p.name)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(p.q||p.name)}" target="_blank">Photos ↗</a></div>
-      ${editControls('places', id)}`;
-    el.appendChild(row);
-  });
-  if(!(tripData.places||[]).length) el.innerHTML = '<p class="small">No places added yet.</p>';
-}
-
-function renderFood(){
-  const el = document.getElementById('food-list');
-  el.innerHTML = (tripData.food||[]).map(f=>`
-    <div class="card">
-      <h3>${f.name} ${f.stars?`<span class="stars">${starsHtml(f.stars)}</span>`:''}</h3>
-      <p class="small">${f.desc||''}</p>
-      <a class="maplink" href="${mapLink(f.q||f.name)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(f.q||f.name)}" target="_blank">Photos ↗</a>
-      ${f.alt?`<div class="stop-alt">${f.alt}</div>`:''}
-    </div>`).join('') || '<p class="small">No restaurants added yet.</p>';
-}
-
-function renderEvents(){
-  const el = document.getElementById('events-list');
-  el.innerHTML = (tripData.events||[]).map(ev=>`
-    <div class="card"><h3>${ev.name} ${certBadge(ev.certainty||'yellow')}</h3><p class="small">${ev.desc||''}</p></div>`).join('') || '<p class="small">No events added yet.</p>';
-}
-
-function renderBudget(){
-  const rows = (tripData.budget||[]).map(b=>`<tr><td>${b.category}</td><td class="mono">${b.estimate}</td><td>${b.note||''}</td></tr>`).join('');
-  document.getElementById('budget-body').innerHTML = `<div class="card"><table><tr><th>Category</th><th>Estimate</th><th>Notes</th></tr>${rows}</table></div>` || '<p class="small">No budget yet.</p>';
-}
-
-function renderDays(){
-  const daynav = document.getElementById('daynav');
-  const content = document.getElementById('day-content');
-  daynav.innerHTML = ''; content.innerHTML = '';
-  (tripData.days||[]).forEach((d,i)=>{
-    const btn = document.createElement('button');
-    btn.textContent = d.label; btn.dataset.idx = i;
-    if(i===0) btn.classList.add('active');
-    daynav.appendChild(btn);
-
-    const block = document.createElement('div');
-    block.className = 'day-block' + (i===0?' active':'');
-    block.dataset.idx = i;
-    let stopsHtml = (d.stops||[]).map((s,idx)=>{
-      const stopId = slugify(d.label)+'-'+slugify(s.name);
-      const nextS = d.stops[idx+1];
-      const route = (!s.transit && s.q && nextS && nextS.q) ? `<a class="maplink" href="${dirLink(s.q,nextS.q)}" target="_blank">→ route to next</a>` : '';
-      return `<div class="stop">
-        <div class="stop-time">${s.t||''}</div>
-        <h4>${s.name}</h4>
-        <div class="stop-desc">${s.desc||''}</div>
-        ${s.alt?`<div class="stop-alt">☔ ${s.alt}</div>`:''}
-        ${s.q?`<a class="maplink" href="${mapLink(s.q)}" target="_blank">Map ↗</a><a class="maplink" href="${imgLink(s.q)}" target="_blank">Photos ↗</a>`:''} ${route}
-        ${editControls('stops', stopId)}
-      </div>`;
+// Generic toggle-chip picker over a fixed option list (e.g. travel methods) — no custom-add.
+function makeChipPicker(containerId, options, formatFn){
+  let state = [];
+  function render(){
+    document.getElementById(containerId).innerHTML = options.map(o=>{
+      const active = state.includes(o);
+      return `<button type="button" class="cat-chip ${active?'active':''}" data-val="${o}">${formatFn ? formatFn(o) : o}</button>`;
     }).join('');
-    block.innerHTML = `<h3>${d.label}</h3><p class="small"><b>${d.theme||''}</b> ${d.sub||''}</p>${stopsHtml}`;
-    content.appendChild(block);
+  }
+  document.getElementById(containerId).addEventListener('click', e=>{
+    const btn = e.target.closest('.cat-chip');
+    if(!btn) return;
+    const v = btn.dataset.val;
+    state = state.includes(v) ? state.filter(x=>x!==v) : [...state, v];
+    render();
   });
+  return { get: () => state.slice(), set: (arr) => { state = (arr||[]).slice(); render(); } };
 }
-document.getElementById('daynav').addEventListener('click', e=>{
-  if(e.target.tagName!=='BUTTON') return;
-  document.querySelectorAll('#daynav button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.day-block').forEach(b=>b.classList.remove('active'));
-  e.target.classList.add('active');
-  document.querySelector(`.day-block[data-idx="${e.target.dataset.idx}"]`).classList.add('active');
+
+// Category chip picker: presets + free-form custom additions.
+function makeCatPicker(chipsId, addBtnId, customInputId){
+  let state = [];
+  function render(){
+    const allCats = [...new Set([...CATEGORY_PRESETS, ...state])];
+    document.getElementById(chipsId).innerHTML = allCats.map(c=>{
+      const active = state.includes(c);
+      return `<button type="button" class="cat-chip ${active?'active':''}" data-cat="${c}">${formatCat(c)}</button>`;
+    }).join('');
+  }
+  document.getElementById(chipsId).addEventListener('click', e=>{
+    const btn = e.target.closest('.cat-chip');
+    if(!btn) return;
+    const c = btn.dataset.cat;
+    state = state.includes(c) ? state.filter(x=>x!==c) : [...state, c];
+    render();
+  });
+  document.getElementById(addBtnId).addEventListener('click', ()=>{
+    const input = document.getElementById(customInputId);
+    const val = input.value.trim().toLowerCase();
+    if(!val) return;
+    if(!state.includes(val)) state.push(val);
+    input.value = '';
+    render();
+  });
+  return {
+    get: () => state.slice(),
+    set: (arr) => { state = (arr||[]).slice(); render(); }
+  };
+}
+
+const TRAVEL_METHODS = ['walking','public transport','car'];
+const etTravelMethodsPicker = makeChipPicker('et-travel-methods', TRAVEL_METHODS, formatCat);
+const catWantPicker = makeCatPicker('et-catwant-chips', 'et-catwant-add', 'et-catwant-custom');
+const catAvoidPicker = makeCatPicker('et-catavoid-chips', 'et-catavoid-add', 'et-catavoid-custom');
+
+const aiTravelMethodsPicker = makeChipPicker('ai-travel-methods', TRAVEL_METHODS, formatCat);
+const aiCatWantPicker = makeCatPicker('ai-catwant-chips', 'ai-catwant-add', 'ai-catwant-custom');
+const aiCatAvoidPicker = makeCatPicker('ai-catavoid-chips', 'ai-catavoid-add', 'ai-catavoid-custom');
+
+function openEditTripModal(){
+  const meta = tripData?.meta || {};
+  const prefs = meta.preferences || emptyPreferences();
+  document.getElementById('et-error').textContent = '';
+  document.getElementById('et-name').value = meta.name || '';
+  document.getElementById('et-start-date').value = meta.startDate || '';
+  document.getElementById('et-end-date').value = meta.endDate || '';
+  populateCurrencySelect(document.getElementById('et-currency'), true);
+  document.getElementById('et-currency').value = meta.defaultCurrency || '';
+  document.getElementById('et-num-people').value = prefs.numPeople ?? '';
+  document.getElementById('et-base-ops').value = prefs.baseOfOperations || '';
+  document.getElementById('et-max-steps').value = prefs.maxStepsPerDay ?? '';
+  document.getElementById('et-budget-max').value = prefs.budget?.max ?? '';
+  document.getElementById('et-budget-realistic').value = prefs.budget?.realistic ?? '';
+  document.getElementById('et-budget-perday').value = prefs.budget?.perDay ?? '';
+  document.getElementById('et-summary').value = meta.summary || '';
+  document.getElementById('et-prefs-freetext').value = prefs.freeText || '';
+  document.getElementById('et-want-to-see').value = (prefs.wantToSee||[]).join('\n');
+  document.getElementById('et-places-avoid').value = (prefs.placesToAvoid||[]).join('\n');
+
+  document.getElementById('et-cities-list').innerHTML = '';
+  (meta.cities||[]).forEach(c=>addCityRow(c.name, c.country));
+
+  etTravelMethodsPicker.set(prefs.travelMethods);
+  catWantPicker.set(prefs.catWant);
+  catAvoidPicker.set(prefs.catAvoid);
+
+  document.getElementById('edit-trip-modal').classList.remove('hidden');
+}
+document.getElementById('btn-edit-trip').addEventListener('click', openEditTripModal);
+document.getElementById('et-cancel').addEventListener('click', ()=>document.getElementById('edit-trip-modal').classList.add('hidden'));
+document.getElementById('edit-trip-modal').addEventListener('click', e=>{
+  if(e.target.id === 'edit-trip-modal') document.getElementById('edit-trip-modal').classList.add('hidden');
 });
+
+async function saveTripDetails(){
+  const errEl = document.getElementById('et-error');
+  errEl.textContent = '';
+  const name = document.getElementById('et-name').value.trim();
+  if(!name){ errEl.textContent = 'Name is required.'; return; }
+
+  const startDate = document.getElementById('et-start-date').value || null;
+  const endDate = document.getElementById('et-end-date').value || null;
+  const defaultCurrency = document.getElementById('et-currency').value;
+
+  const cities = Array.from(document.querySelectorAll('#et-cities-list .link-row')).map(row=>({
+    name: row.querySelector('.et-city-name').value.trim(),
+    country: row.querySelector('.et-city-country').value.trim(),
+    dateRangeWithinTrip: ''
+  })).filter(c=>c.name);
+  const citiesIndex = cities.map(c=>c.country ? `${c.name}, ${c.country}` : c.name);
+
+  const numVal = v => v === '' ? null : Number(v);
+  const preferences = {
+    freeText: document.getElementById('et-prefs-freetext').value.trim(),
+    numPeople: numVal(document.getElementById('et-num-people').value),
+    baseOfOperations: document.getElementById('et-base-ops').value.trim(),
+    budget: {
+      max: numVal(document.getElementById('et-budget-max').value),
+      realistic: numVal(document.getElementById('et-budget-realistic').value),
+      perDay: numVal(document.getElementById('et-budget-perday').value)
+    },
+    maxStepsPerDay: numVal(document.getElementById('et-max-steps').value),
+    travelMethods: etTravelMethodsPicker.get(),
+    wantToSee: document.getElementById('et-want-to-see').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    placesToAvoid: document.getElementById('et-places-avoid').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    catWant: catWantPicker.get(),
+    catAvoid: catAvoidPicker.get()
+  };
+
+  const meta = {
+    ...tripData.meta,
+    name, startDate, endDate, cities, defaultCurrency,
+    summary: document.getElementById('et-summary').value.trim(),
+    preferences
+  };
+
+  await db.collection('trips').doc(currentTripId).update({
+    name, startDate, endDate, cities: citiesIndex, updatedAt: Date.now()
+  });
+  await db.collection('tripData').doc(currentTripId).update({ meta });
+
+  tripData.meta = meta;
+  document.getElementById('trip-title').textContent = meta.name;
+  document.getElementById('tv-name').textContent = meta.name;
+  document.getElementById('tv-dates').textContent = formatDateRange(meta.startDate, meta.endDate);
+  document.getElementById('tv-cities').innerHTML = cities.map(c=>`<span class="tag">${c.name}${c.country ? ', '+c.country : ''}</span>`).join('');
+  document.getElementById('tv-summary').textContent = meta.summary || 'No summary yet.';
+
+  document.getElementById('edit-trip-modal').classList.add('hidden');
+}
+document.getElementById('et-save').addEventListener('click', saveTripDetails);
 
 // ---------- Tabs ----------
 document.getElementById('tabs').addEventListener('click', e=>{
@@ -584,149 +973,611 @@ document.getElementById('tabs').addEventListener('click', e=>{
   document.getElementById('p-'+e.target.dataset.tab).classList.add('active');
 });
 
-// ---------- Import / save JSON ----------
-document.getElementById('btn-import-save').addEventListener('click', async ()=>{
-  const statusEl = document.getElementById('import-status');
-  try{
-    const parsed = JSON.parse(document.getElementById('import-box').value);
-    await db.collection('tripData').doc(currentTripId).set(parsed);
-    await db.collection('trips').doc(currentTripId).set({
-      name: parsed.meta?.name || currentTripId,
-      dateRange: parsed.meta?.dateRange || '',
-      updatedAt: Date.now()
-    }, {merge:true});
-    tripData = parsed;
-    renderAll();
-    statusEl.style.color = 'var(--moss)';
-    statusEl.textContent = 'Saved — synced live to both accounts.';
-  }catch(err){
-    statusEl.style.color = 'var(--red)';
-    statusEl.textContent = 'Could not parse/save: ' + err.message;
+// ---------- Places ----------
+function slugify(s){ return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
+const mapLink = q => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+
+const CATEGORY_PRESETS = ['food','museum','park/nature','shopping','landmark','nightlife'];
+function formatCat(c){ return (c||'').replace(/(^|\/)(\w)/g, (m,p,ch)=>p+ch.toUpperCase()); }
+
+function certBadge(c){
+  const m = { green:['b-green','Confirmed'], yellow:['b-yellow','Likely'], red:['b-red','Uncertain'] };
+  const x = m[c] || m.yellow;
+  return `<span class="badge ${x[0]}">${x[1]}</span>`;
+}
+
+function formatPriceBase(price){
+  if(!price) return '';
+  const parts = [];
+  if(price.amount != null && price.currency) parts.push(`${price.amount} ${price.currency}`);
+  if(price.note) parts.push(price.note);
+  return parts.join(' · ');
+}
+
+function formatHours(hours){
+  if(!hours) return '';
+  const parts = [];
+  if(hours.open && hours.close) parts.push(`${hours.open}–${hours.close}`);
+  if(hours.note) parts.push(hours.note);
+  return parts.join(' · ');
+}
+
+async function updatePriceConversions(ordered){
+  const defaultCur = tripData?.meta?.defaultCurrency;
+  if(!defaultCur) return;
+  for(const {p, i} of ordered){
+    if(!p.price?.amount || !p.price?.currency || p.price.currency === defaultCur) continue;
+    const rate = await getRate(p.price.currency, defaultCur);
+    if(rate == null) continue;
+    const span = document.querySelector(`.price-convert[data-idx="${i}"]`);
+    if(span) span.textContent = ` (≈${Math.round(p.price.amount * rate)} ${defaultCur})`;
+  }
+}
+
+let placesCatFilter = null; // null = show all
+
+const UNCATEGORIZED = '__uncategorized__';
+
+function renderCatFilter(){
+  const el = document.getElementById('cat-filter');
+  const places = tripData?.places || [];
+  const cats = [...new Set(places.flatMap(p=>p.cat||[]))].sort();
+  const hasUncategorized = places.some(p=>!(p.cat||[]).length);
+  if(!cats.length && !hasUncategorized){ el.innerHTML = ''; return; }
+  const chips = [`<button type="button" class="cat-chip ${!placesCatFilter?'active':''}" data-cat="">All</button>`,
+    ...cats.map(c=>`<button type="button" class="cat-chip ${placesCatFilter===c?'active':''}" data-cat="${c}">${formatCat(c)}</button>`)];
+  if(hasUncategorized) chips.push(`<button type="button" class="cat-chip ${placesCatFilter===UNCATEGORIZED?'active':''}" data-cat="${UNCATEGORIZED}">Uncategorized</button>`);
+  el.innerHTML = chips.join('');
+}
+document.getElementById('cat-filter').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  placesCatFilter = btn.dataset.cat || null;
+  renderPlaces();
+});
+
+let placesSourceFilter = null; // null | 'ai' | 'user'
+
+function renderSourceFilter(){
+  const el = document.getElementById('source-filter');
+  const places = tripData?.places || [];
+  const hasAi = places.some(p=>p.source?.ai);
+  const hasUser = places.some(p=>p.source?.user);
+  if(!hasAi && !hasUser){ el.innerHTML = ''; return; }
+  const chips = [`<button type="button" class="cat-chip ${!placesSourceFilter?'active':''}" data-source="">All</button>`];
+  if(hasAi) chips.push(`<button type="button" class="cat-chip ${placesSourceFilter==='ai'?'active':''}" data-source="ai">✨ AI-generated</button>`);
+  if(hasUser) chips.push(`<button type="button" class="cat-chip ${placesSourceFilter==='user'?'active':''}" data-source="user">✎ User-added</button>`);
+  el.innerHTML = chips.join('');
+}
+document.getElementById('source-filter').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  placesSourceFilter = btn.dataset.source || null;
+  renderPlaces();
+});
+
+function sourceIcons(source){
+  if(!source) return '';
+  const icons = [];
+  if(source.ai) icons.push('<span class="source-icon" title="AI-generated">✨</span>');
+  if(source.user) icons.push('<span class="source-icon" title="Added/edited by you">✎</span>');
+  return icons.join('');
+}
+
+function renderPlaces(){
+  renderCatFilter();
+  renderSourceFilter();
+  const el = document.getElementById('places-list');
+  const all = tripData?.places || [];
+  let withIdx = all.map((p, i)=>({p, i}));
+  if(placesCatFilter){
+    withIdx = placesCatFilter === UNCATEGORIZED
+      ? withIdx.filter(({p})=>!(p.cat||[]).length)
+      : withIdx.filter(({p})=>(p.cat||[]).includes(placesCatFilter));
+  }
+  if(placesSourceFilter){
+    withIdx = withIdx.filter(({p})=>p.source?.[placesSourceFilter]);
+  }
+  const filtered = withIdx;
+  if(!filtered.length){
+    el.innerHTML = (placesCatFilter || placesSourceFilter) ? '<p class="mono">No places match this filter.</p>' : '<p class="mono">No places added yet.</p>';
+    return;
+  }
+
+  const ordered = filtered.slice().sort((a,b)=>(b.p.wantRating||0)-(a.p.wantRating||0));
+  el.innerHTML = ordered.map(({p, i})=>{
+    const id = p.id || slugify(p.name);
+    const note = tripNotes.places[id] || { note:'' };
+    const catTags = (p.cat||[]).map(c=>`<span class="tag">${formatCat(c)}</span>`).join('');
+    const links = (p.links||[]).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
+    const coordsTag = p.coords ? `<span class="coords-tag">${p.coords.lat.toFixed(4)}, ${p.coords.lng.toFixed(4)} (${p.coordsSource||'user'})</span>` : '';
+    const wantClass = (p.wantRating||0) > 7 ? 'want-rating main' : 'want-rating';
+    const priceBase = formatPriceBase(p.price);
+    const priceDisplay = priceBase ? `${priceBase}<span class="price-convert" data-idx="${i}"></span>` : '';
+    const hoursBase = formatHours(p.hours);
+
+    return `<div class="place-row" data-idx="${i}">
+      <div class="place-name">${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)} ${sourceIcons(p.source)}</div>
+      <div class="place-meta">${[p.city, p.area, priceDisplay, hoursBase].filter(Boolean).join(' · ')}</div>
+      ${catTags ? `<div style="margin-top:6px;">${catTags}</div>` : ''}
+      ${p.note ? `<div class="place-meta">${p.note}</div>` : ''}
+      ${(p.wishlist||[]).length ? `<div class="place-meta">Wishlist: ${p.wishlist.join(', ')}</div>` : ''}
+      <div style="margin-top:6px;">
+        <a class="place-link" href="${mapLink(p.name+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${coordsTag}
+      </div>
+      <div class="place-actions">
+        <button class="js-edit-place" data-idx="${i}">Edit</button>
+        <button class="js-delete-place" data-idx="${i}">Delete</button>
+      </div>
+      <div class="edit-row" data-placeid="${id}">
+        <textarea class="js-place-note" placeholder="Plan note (reservation reminders, preferences...)">${(note.note||'').replace(/</g,'&lt;')}</textarea>
+      </div>
+    </div>`;
+  }).join('');
+
+  updatePriceConversions(ordered);
+}
+
+document.getElementById('places-list').addEventListener('click', e=>{
+  if(e.target.classList.contains('js-edit-place')) openPlaceModal(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-delete-place')) deletePlace(Number(e.target.dataset.idx));
+});
+document.getElementById('places-list').addEventListener('input', e=>{
+  if(e.target.classList.contains('js-place-note')){
+    const placeId = e.target.closest('.edit-row').dataset.placeid;
+    db.collection('tripNotes').doc(currentTripId).set({places:{[placeId]:{note:e.target.value}}}, {merge:true});
   }
 });
 
-// ---------- Seed data: your existing Copenhagen plan, condensed into the generic schema ----------
-const SEED_COPENHAGEN = {
-  meta:{ name:'Copenhagen', dateRange:'24–30 Aug 2026', ceiling:'€2000 for two',
-    summary:'Six days from Zagreb, staying at Robert Jacobsens Vej 57 (Ørestad). Built as 8 interchangeable day-modules so you can swap freely.' },
-  places:[
-    {stars:5,name:"Tivoli Gardens",area:"City Centre",price:"~170–195 DKK entry",hours:"11:00–23:00, open through 22 Sep 2026",note:"The amusement park.",certainty:"green",q:"Tivoli Gardens Copenhagen"},
-    {stars:5,name:"Nyhavn",area:"City Centre",price:"Free",hours:"Always",note:"Colourful 17th-c. harbour.",certainty:"green",q:"Nyhavn Copenhagen"},
-    {stars:5,name:"Church of Our Saviour (Vor Frelsers Kirke)",area:"Christianshavn",price:"Church free · tower ~69 DKK",hours:"11:00–15:30 daily; tower closes in rain/wind",note:"The spiral 'stairway to heaven' tower.",certainty:"green",q:"Church of Our Saviour Vor Frelsers Kirke Copenhagen"},
-    {stars:5,name:"Freetown Christiania",area:"Christianshavn",price:"Free",hours:"Always (no photos on Pusher St.)",note:"The hippie district.",certainty:"green",q:"Freetown Christiania Copenhagen"},
-    {stars:5,name:"Reffen",area:"Refshaleøen",price:"Pay per stall",hours:"~11:30–20:30+ daily, Apr–Oct",note:"Street food market across the water.",certainty:"green",q:"Reffen Refshalevej 167A Copenhagen"},
-    {stars:5,name:"Copenhagen Botanical Garden",area:"City Centre",price:"Free, Palm House small fee",hours:"08:30–18:00 (Mar–Oct)",note:"The garden from your last visit.",certainty:"green",q:"Copenhagen Botanical Garden"},
-    {stars:4,name:"Canal boat tour",area:"Nyhavn",price:"60–129 DKK",hours:"Frequent daytime departures",note:"Do this early as a city overview.",certainty:"green",q:"Nyhavn canal boat tour departure"},
-    {stars:4,name:"Strøget",area:"City Centre",price:"Free to browse",hours:"~10:00–18:00",note:"Main shopping street.",certainty:"green",q:"Stroget Copenhagen"},
-    {stars:4,name:"Rundetaarn",area:"City Centre",price:"~45 DKK",hours:"~10:00–20:00",note:"Climbable spiral-ramp tower.",certainty:"yellow",q:"Rundetaarn Round Tower Copenhagen"},
-    {stars:4,name:"Amalienborg Palace",area:"Frederiksstaden",price:"Free courtyard",hours:"Guard change ~12:00",note:"Royal residence.",certainty:"green",q:"Amalienborg Palace Copenhagen"},
-    {stars:4,name:"The Little Mermaid",area:"Langelinie",price:"Free",hours:"Always",note:"Small statue, big reputation.",certainty:"green",q:"The Little Mermaid statue Copenhagen"},
-    {stars:4,name:"Kastellet",area:"Langelinie",price:"Free",hours:"06:00–22:00",note:"Star-shaped fortress, ramparts walk.",certainty:"green",q:"Kastellet Copenhagen"},
-    {stars:4,name:"Torvehallerne",area:"Nørreport",price:"Pay per stall",hours:"~10:00–19:00",note:"Glass-hall food market.",certainty:"green",q:"Torvehallerne Copenhagen"},
-    {stars:4,name:"Kødbyen",area:"Vesterbro",price:"Varies",hours:"Evenings",note:"Meatpacking district, Cooking Festival hub 27–30 Aug.",certainty:"green",q:"Kodbyen Meatpacking District Copenhagen"},
-    {stars:4,name:"Assistens Cemetery",area:"Nørrebro",price:"Free",hours:"07:00–dusk",note:"H.C. Andersen and Kierkegaard's graves.",certainty:"green",q:"Assistens Cemetery Norrebro Copenhagen"},
-    {stars:4,name:"Superkilen park",area:"Nørrebro",price:"Free",hours:"Always",note:"Bold multicultural park.",certainty:"green",q:"Superkilen Norrebro Copenhagen"},
-    {stars:3,name:"Copenhagen Cathedral",area:"City Centre",price:"Free",hours:"~08:00–17:00",note:"Main church, closed during services.",certainty:"yellow",q:"Vor Frue Kirke Copenhagen Cathedral"},
-    {stars:3,name:"Marble Church",area:"Frederiksstaden",price:"Free",hours:"~10:00–17:00",note:"Huge copper dome near Amalienborg.",certainty:"yellow",q:"Marble Church Frederiks Kirke Copenhagen"},
-    {stars:3,name:"Grundtvig's Church",area:"Bispebjerg",price:"Free",hours:"~09:00–16:00",note:"Striking 1940s brick architecture.",certainty:"yellow",q:"Grundtvigs Kirke Copenhagen"},
-    {stars:3,name:"National Museum of Denmark",area:"City Centre",price:"Free permanent collection",hours:"10:00–17:00, closed Mon",note:"Broad Danish history.",certainty:"yellow",q:"National Museum of Denmark"},
-    {stars:3,name:"Designmuseum Denmark",area:"Frederiksstaden",price:"~130 DKK",hours:"11:00–18:00, closed Mon",note:"Danish design.",certainty:"yellow",q:"Designmuseum Denmark Copenhagen"},
-    {stars:3,name:"Christiansborg Palace Tower",area:"City Centre",price:"Free",hours:"~10:00–21:00",note:"Free viewpoint, less crowded.",certainty:"yellow",q:"Christiansborg Tower Copenhagen"},
-    {stars:3,name:"Frederiksberg Gardens",area:"Frederiksberg",price:"Free",hours:"06:00–dusk",note:"Quieter park alternative.",certainty:"green",q:"Frederiksberg Gardens Copenhagen"},
-    {stars:3,name:"Opera House",area:"Holmen",price:"Free to view",hours:"Always",note:"Modern landmark, great harbour photo.",certainty:"green",q:"Copenhagen Opera House"}
-  ],
-  food:[
-    {stars:5,name:"POPL Burger",area:"Christianshavn",desc:"Strandgade 108 — Noma-chef burger bar. Reserve online, set menu ~450 DKK/person.",q:"POPL Burger Strandgade 108 Copenhagen"},
-    {stars:4,name:"Jah Izakaya & Sake Bar",area:"Vesterbro",desc:"Gasværksvej 21 — first sake bar in CPH, small shareable plates. Reserve ahead.",q:"Jah Izakaya Sake Bar Copenhagen"},
-    {stars:4,name:"Restaurant Schønnemann",area:"City Centre",desc:"Historic smørrebrød house since 1877. Reserve, especially for lunch.",q:"Restaurant Schonnemann Copenhagen",alt:"Rich/rye/herring — pace yourselves if stomach-sensitive."},
-    {stars:5,name:"Reffen",area:"Refshaleøen",desc:"30–50 street food stalls, reached by harbour bus. Daily ~11:30–20:30+, Apr–Oct.",q:"Reffen Refshalevej 167A Copenhagen"},
-    {stars:5,name:"Hart Bageri",area:"Vesterbro",desc:"Gl. Kongevej 109 — top artisan bakery, go early on weekends.",q:"Hart Bageri Gl Kongevej 109 Copenhagen"},
-    {stars:4,name:"Sanchez",area:"Vesterbro",desc:"Mexican-Nordic by chef Rosio Sanchez (ex-Noma). Reserve ahead.",q:"Sanchez restaurant Rosio Copenhagen"},
-    {stars:4,name:"Cofoco",area:"Vesterbro",desc:"Affordable 3-course New Nordic set menu, ~395 DKK/person. Reserve.",q:"Cofoco restaurant Copenhagen"},
-    {stars:3,name:"DØP hot dog cart",area:"City Centre",desc:"Organic Danish hot dogs, ~40–60 DKK, no reservation needed.",q:"DOP hotdog Copenhagen"},
-    {stars:4,name:"The Coffee Collective",area:"Multiple",desc:"Copenhagen's best-known specialty roaster.",q:"The Coffee Collective Copenhagen"}
-  ],
-  events:[
-    {name:"Copenhagen Cooking & Food Festival",certainty:"green",desc:"21–30 Aug 2026, covers your whole stay. Kødbyen hub live Thu 27–Sun 30 Aug."},
-    {name:"Live music / theatre in English",certainty:"red",desc:"Venue calendars (Jazzhus Montmartre, Vega, Royal Danish Theatre) publish 6–10 weeks out — check closer to travel."}
-  ],
-  budget:[
-    {category:"Mon: single/24h transport",estimate:"€28–160",note:"See Transport notes"},
-    {category:"Copenhagen Card Discover, 120h ×2",estimate:"≈ €380",note:"Covers Tue–Sun transport + Tivoli + Church tower + a canal tour"},
-    {category:"Tivoli rides (optional)",estimate:"€50–60",note:"Never covered by any pass"},
-    {category:"Reffen (1 visit)",estimate:"≈ €65",note:""},
-    {category:"POPL Burger dinner",estimate:"≈ €120",note:"À la carte cheaper, ~€25–30/person"},
-    {category:"Jah Izakaya dinner",estimate:"€70–150",note:""},
-    {category:"Smørrebrød lunch",estimate:"≈ €45",note:""},
-    {category:"Everyday meals/coffee/snacks",estimate:"≈ €180",note:"~€30/day/couple average"},
-    {category:"Optional car/train day",estimate:"€0–160",note:"€0 if train day-trip is covered by the Card"},
-    {category:"Shopping / buffer",estimate:"€840–1110",note:"What's left under the €2000 ceiling"}
-  ],
-  days:[
-    {label:"Day 1 · Mon 24 · Arrival",theme:"Christianshavn, gently",sub:"Land ~11:00, ease in. ~4–5k steps.",stops:[
-      {t:"~13:00",name:"Settle in at Robert Jacobsens Vej 57",desc:"Drop bags, quick reset.",q:"Robert Jacobsens Vej 57 Copenhagen"},
-      {t:"~14:30",name:"Metro/bus into Christianshavn",desc:"~10–15 min from Ørestad.",transit:true},
-      {t:"~15:00",name:"Wander Christianshavn canals",desc:"Houseboats, small bridges.",q:"Christianshavns Kanal Copenhagen"},
-      {t:"~15:45",name:"Church of Our Saviour — exterior + free interior",desc:"Save the tower for a clear day.",q:"Vor Frelsers Kirke Copenhagen",alt:"Fully indoor already."},
-      {t:"~17:00",name:"POPL Burger, early dinner",desc:"On the water in Christianshavn.",q:"POPL Burger Copenhagen"},
-      {t:"~19:00",name:"Evening walk to Nyhavn",desc:"20 min walk along the harbour.",q:"Nyhavn Copenhagen"}
-    ]},
-    {label:"Day 2 · Indre By classic",theme:"City centre + boat tour",sub:"~14–16k steps.",stops:[
-      {t:"09:30",name:"Nyhavn",desc:"Before the crowds.",q:"Nyhavn Copenhagen"},
-      {t:"10:15",name:"Canal boat tour (~1hr)",desc:"Netto-Bådene or Stromma.",q:"Nyhavn canal boat tour"},
-      {t:"11:30",name:"Strøget — first look",desc:"Window-shop, note what to buy later.",q:"Stroget Copenhagen"},
-      {t:"12:15",name:"Rundetaarn",desc:"Spiral ramp climb.",q:"Rundetaarn Copenhagen",alt:"Fully indoor climb."},
-      {t:"13:00",name:"Lunch at Torvehallerne",desc:"Easy variety.",q:"Torvehallerne Copenhagen"},
-      {t:"14:30",name:"Copenhagen Cathedral",desc:"Quick free stop.",q:"Vor Frue Kirke Copenhagen"},
-      {t:"15:15",name:"Amalienborg + guard grounds",desc:"Guard change ~12:00 if reordering.",q:"Amalienborg Palace Copenhagen"},
-      {t:"16:00",name:"Marble Church",desc:"Huge dome, free.",q:"Marmorkirken Copenhagen"},
-      {t:"17:00",name:"Little Mermaid + Kastellet",desc:"Ramparts walk to unwind.",q:"Kastellet Copenhagen"},
-      {t:"19:00",name:"Dinner — your call",desc:"Open choice back in the centre.",q:"Restaurants Copenhagen city centre"}
-    ]},
-    {label:"Day 3 · Christiania + Christianshavn deep",theme:"Hippie district, church tower",sub:"~10–12k steps.",stops:[
-      {t:"10:30",name:"Freetown Christiania",desc:"1.5–2 hrs — no photos on Pusher Street.",q:"Freetown Christiania Copenhagen"},
-      {t:"12:30",name:"Lunch near Christianshavn",desc:"Cafés on Torvegade.",q:"restaurants Torvegade Christianshavn"},
-      {t:"14:00",name:"Church of Our Saviour — tower climb",desc:"Only if dry/calm — book a slot.",q:"Vor Frelsers Kirke tower Copenhagen",alt:"Swap for Christiansborg Tower (free, indoor) if windy/rainy."},
-      {t:"15:15",name:"Christianshavn canal walk",desc:"Easy recovery after 400 steps.",q:"Christianshavns Kanal Copenhagen"},
-      {t:"16:30",name:"Opera House view",desc:"Free, 15 min.",q:"Copenhagen Opera House view"},
-      {t:"18:30",name:"Dinner: Jah Izakaya",desc:"~20 min transit into Vesterbro.",q:"Jah Izakaya Copenhagen"}
-    ]},
-    {label:"Day 4 · Tivoli + Vesterbro/Kødbyen",theme:"Amusement park + Cooking Festival hub",sub:"Best Thu 27+. ~8–14k steps.",stops:[
-      {t:"11:00",name:"Tivoli Gardens",desc:"3–5 hrs, or flip to evening for the lights.",q:"Tivoli Gardens Copenhagen",alt:"Mostly fine in light rain — many covered pavilions."},
-      {t:"15:30",name:"Walk to Vesterbro/Kødbyen",desc:"15 min past the murals.",q:"Kodbyen Copenhagen"},
-      {t:"16:00",name:"Cooking & Food Festival hub",desc:"Live Thu 27–Sun 30 Aug only.",q:"Kodbyen Meatpacking District Copenhagen"},
-      {t:"19:00",name:"Dinner: Jah Izakaya",desc:"Right here in Vesterbro.",q:"Jah Izakaya Copenhagen"}
-    ]},
-    {label:"Day 5 · Parks & Nørrebro",theme:"Botanical Garden, alt-Nørrebro",sub:"~10–13k steps.",stops:[
-      {t:"10:00",name:"Copenhagen Botanical Garden",desc:"1–1.5 hrs.",q:"Copenhagen Botanical Garden",alt:"Palm House sheltered; open grounds less so."},
-      {t:"11:30",name:"Kongens Have / Rosenborg grounds",desc:"Free royal garden next door.",q:"Kongens Have Rosenborg Copenhagen"},
-      {t:"~12:30–14:30",name:"Free block / rest",desc:"Your requested open slot.",q:""},
-      {t:"14:30",name:"Metro/bus to Nørrebro",desc:"~10–15 min.",transit:true},
-      {t:"15:00",name:"Assistens Cemetery",desc:"Calm, green, unusual.",q:"Assistens Cemetery Copenhagen"},
-      {t:"16:00",name:"Nørrebrogade + Superkilen",desc:"Multicultural main street, colourful park.",q:"Superkilen Copenhagen"},
-      {t:"18:00",name:"Dinner in Nørrebro",desc:"Jægersborggade has good casual options.",q:"Jaegersborggade restaurants Copenhagen"}
-    ]},
-    {label:"Day 6 · Reffen & the harbour",theme:"Street food + boat + Mermaid loop",sub:"~9–12k steps, flat.",stops:[
-      {t:"12:00",name:"Harbour bus to Refshaleøen",desc:"5–15 min, itself a mini boat tour.",q:"Nordre Toldbod harbour bus stop Copenhagen"},
-      {t:"12:30",name:"Reffen",desc:"2 hrs minimum.",q:"Reffen Copenhagen",alt:"Mostly outdoor — swap for Torvehallerne if wet."},
-      {t:"15:00",name:"Harbour bus back",desc:"Opposite direction.",transit:true},
-      {t:"15:30",name:"Little Mermaid + Langelinie",desc:"Waterfront walk.",q:"The Little Mermaid Copenhagen"},
-      {t:"16:15",name:"Kastellet",desc:"Ramparts, windmill.",q:"Kastellet Copenhagen"},
-      {t:"18:00",name:"Free block / rest",desc:"Second open slot.",q:""}
-    ]},
-    {label:"Day 7 · Museums, shopping & buffer",theme:"Catch-up day",sub:"~6–10k steps.",stops:[
-      {t:"10:30",name:"Pick ONE museum",desc:"National Museum or Designmuseum, not both.",q:"National Museum of Denmark"},
-      {t:"12:30",name:"Lunch: Restaurant Schønnemann",desc:"Classic smørrebrød — book ahead.",q:"Restaurant Schonnemann Copenhagen"},
-      {t:"14:00",name:"Strøget — the actual shopping pass",desc:"Now you know what you want.",q:"Stroget Copenhagen"},
-      {t:"16:00",name:"Christiansborg Tower",desc:"Free indoor-accessible viewpoint.",q:"Christiansborg Tower Copenhagen",alt:"Good rainy-day anchor for the whole day."}
-    ]},
-    {label:"Day 8 (optional) · Car/train day",theme:"If your brother rents a car",sub:"Slot in anywhere.",stops:[
-      {t:"Option A",name:"Kronborg Castle, Helsingør",desc:"~45 min drive, 'Hamlet's castle'.",q:"Kronborg Castle Helsingor"},
-      {t:"Option B",name:"Louisiana Museum, Humlebæk",desc:"~35 min drive, art + architecture on the coast.",q:"Louisiana Museum of Modern Art Humlebaek"},
-      {t:"Option C",name:"Roskilde: Viking Ship Museum",desc:"~30 min drive, opposite direction.",q:"Roskilde Viking Ship Museum"}
-    ]}
-  ]
-};
+// ---------- Place modal ----------
+let editingPlaceIdx = null;
+
+function addLinkRow(label, url){
+  const row = document.createElement('div');
+  row.className = 'link-row';
+  row.innerHTML = `<input class="pl-link-label" placeholder="Label (e.g. Official site)" value="${label||''}">
+    <input class="pl-link-url" placeholder="https://…" value="${url||''}">
+    <button type="button" class="pl-link-remove">×</button>`;
+  row.querySelector('.pl-link-remove').addEventListener('click', ()=>row.remove());
+  document.getElementById('pl-links-list').appendChild(row);
+}
+document.getElementById('pl-add-link').addEventListener('click', ()=>addLinkRow());
+
+// ---------- Category chips ----------
+let currentCats = [];
+function renderCatChips(){
+  const el = document.getElementById('pl-cat-chips');
+  const allCats = [...new Set([...CATEGORY_PRESETS, ...currentCats])];
+  el.innerHTML = allCats.map(c=>{
+    const active = currentCats.includes(c);
+    return `<button type="button" class="cat-chip ${active?'active':''}" data-cat="${c}">${formatCat(c)}</button>`;
+  }).join('');
+}
+document.getElementById('pl-cat-chips').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  const c = btn.dataset.cat;
+  currentCats = currentCats.includes(c) ? currentCats.filter(x=>x!==c) : [...currentCats, c];
+  renderCatChips();
+});
+function addCustomCat(){
+  const input = document.getElementById('pl-cat-custom');
+  const val = input.value.trim().toLowerCase();
+  if(!val) return;
+  if(!currentCats.includes(val)) currentCats.push(val);
+  input.value = '';
+  renderCatChips();
+}
+document.getElementById('pl-cat-add').addEventListener('click', addCustomCat);
+document.getElementById('pl-cat-custom').addEventListener('keydown', e=>{
+  if(e.key === 'Enter'){ e.preventDefault(); addCustomCat(); }
+});
+
+function countryCurrencyForCity(cityName){
+  const cities = tripData?.meta?.cities || [];
+  const match = cities.find(c=>(c.name||'').trim().toLowerCase() === (cityName||'').trim().toLowerCase());
+  return match ? currencyForCountry(match.country) : null;
+}
+
+// Puts the place's local (city→country) currency and the trip's default currency first in the
+// dropdown — the two a traveler actually thinks in — then the rest of the list alphabetically.
+function populatePriceCurrencySelect(cityName){
+  const sel = document.getElementById('pl-price-currency');
+  const prevValue = sel.value;
+  const countryCur = countryCurrencyForCity(cityName);
+  const defaultCur = tripData?.meta?.defaultCurrency || null;
+  const priority = [countryCur, defaultCur].filter(Boolean);
+  const rest = CURRENCY_CODES.filter(c=>!priority.includes(c));
+  const codes = [...new Set([...priority, ...rest])];
+  sel.innerHTML = codes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  sel.value = codes.includes(prevValue) ? prevValue : (countryCur || defaultCur || codes[0] || '');
+  return { countryCur, defaultCur };
+}
+
+async function updatePricePreview(){
+  const previewEl = document.getElementById('pl-price-preview');
+  const amount = Number(document.getElementById('pl-price-amount').value);
+  const currency = document.getElementById('pl-price-currency').value;
+  const countryCur = countryCurrencyForCity(document.getElementById('pl-city').value);
+  if(!amount || !currency || !countryCur || currency === countryCur){ previewEl.textContent = ''; return; }
+  const rate = await getRate(currency, countryCur);
+  if(rate == null){ previewEl.textContent = ''; return; }
+  previewEl.textContent = `≈ ${Math.round(amount * rate)} ${countryCur}`;
+}
+document.getElementById('pl-price-amount').addEventListener('input', updatePricePreview);
+document.getElementById('pl-price-currency').addEventListener('change', updatePricePreview);
+document.getElementById('pl-city').addEventListener('change', e=>{
+  populatePriceCurrencySelect(e.target.value);
+  updatePricePreview();
+});
+
+function openPlaceModal(idx){
+  editingPlaceIdx = idx;
+  const p = (idx!=null) ? tripData.places[idx] : {};
+
+  // City datalist: trip's own cities plus any cities already used on other places
+  const cityNames = new Set((tripData?.meta?.cities||[]).map(c=>c.name).filter(Boolean));
+  (tripData?.places||[]).forEach(pl=>{ if(pl.city) cityNames.add(pl.city); });
+  document.getElementById('pl-city-list').innerHTML = [...cityNames].map(c=>`<option value="${c}">`).join('');
+
+  // Default city for a new place: last-used place's city, else the trip's only city
+  let defaultCity = '';
+  if(idx==null){
+    const places = tripData?.places || [];
+    if(places.length) defaultCity = places[places.length-1].city || '';
+    else if((tripData?.meta?.cities||[]).length === 1) defaultCity = tripData.meta.cities[0].name;
+  }
+
+  document.getElementById('pl-modal-title').textContent = idx!=null ? 'Edit place' : 'Add place';
+  document.getElementById('pl-name').value = p.name || '';
+  const cityValue = p.city || defaultCity;
+  document.getElementById('pl-city').value = cityValue;
+  document.getElementById('pl-area').value = p.area || '';
+  document.getElementById('pl-want').value = p.wantRating || '';
+
+  currentCats = (p.cat||[]).slice();
+  renderCatChips();
+  document.getElementById('pl-cat-custom').value = '';
+  const customCatsUsed = [...new Set((tripData?.places||[]).flatMap(pl=>pl.cat||[]).filter(c=>!CATEGORY_PRESETS.includes(c)))];
+  document.getElementById('pl-cat-list').innerHTML = customCatsUsed.map(c=>`<option value="${c}">`).join('');
+
+  populatePriceCurrencySelect(cityValue);
+  document.getElementById('pl-price-amount').value = p.price?.amount ?? '';
+  if(p.price?.currency) document.getElementById('pl-price-currency').value = p.price.currency;
+  document.getElementById('pl-price-note').value = p.price?.note || '';
+  updatePricePreview();
+
+  document.getElementById('pl-hours-open').value = p.hours?.open || '';
+  document.getElementById('pl-hours-close').value = p.hours?.close || '';
+  document.getElementById('pl-hours-note').value = p.hours?.note || '';
+  document.getElementById('pl-certainty').value = p.certainty || 'yellow';
+  document.getElementById('pl-note').value = p.note || '';
+  document.getElementById('pl-wishlist').value = (p.wishlist||[]).join('\n');
+  document.getElementById('pl-lat').value = p.coords?.lat ?? '';
+  document.getElementById('pl-lng').value = p.coords?.lng ?? '';
+  document.getElementById('pl-error').textContent = '';
+  document.getElementById('pl-links-list').innerHTML = '';
+  (p.links||[]).forEach(l=>addLinkRow(l.label, l.url));
+  document.getElementById('place-modal').classList.remove('hidden');
+  document.getElementById('pl-name').focus();
+}
+document.getElementById('btn-add-place').addEventListener('click', ()=>openPlaceModal(null));
+document.getElementById('pl-cancel').addEventListener('click', ()=>document.getElementById('place-modal').classList.add('hidden'));
+document.getElementById('place-modal').addEventListener('click', e=>{
+  if(e.target.id === 'place-modal') document.getElementById('place-modal').classList.add('hidden');
+});
+
+async function savePlace(){
+  const name = document.getElementById('pl-name').value.trim();
+  const errEl = document.getElementById('pl-error');
+  errEl.textContent = '';
+  if(!name){ errEl.textContent = 'Name is required.'; return; }
+
+  const wantVal = document.getElementById('pl-want').value;
+  if(wantVal !== ''){
+    const n = Number(wantVal);
+    if(!Number.isInteger(n) || n < 1 || n > 10){ errEl.textContent = 'Want rating must be a whole number from 1 to 10.'; return; }
+  }
+
+  const lat = document.getElementById('pl-lat').value;
+  const lng = document.getElementById('pl-lng').value;
+  if((lat === '') !== (lng === '')){ errEl.textContent = 'Provide both latitude and longitude, or neither.'; return; }
+
+  const links = Array.from(document.querySelectorAll('#pl-links-list .link-row')).map(row=>({
+    label: row.querySelector('.pl-link-label').value.trim(),
+    url: row.querySelector('.pl-link-url').value.trim()
+  })).filter(l=>l.label && l.url);
+
+  const amountVal = document.getElementById('pl-price-amount').value;
+  const price = {
+    amount: amountVal !== '' ? Number(amountVal) : null,
+    currency: document.getElementById('pl-price-currency').value || null,
+    note: document.getElementById('pl-price-note').value.trim()
+  };
+  const hours = {
+    open: document.getElementById('pl-hours-open').value || null,
+    close: document.getElementById('pl-hours-close').value || null,
+    note: document.getElementById('pl-hours-note').value.trim()
+  };
+
+  const place = {
+    id: editingPlaceIdx!=null ? tripData.places[editingPlaceIdx].id || slugify(name) : slugify(name),
+    name,
+    city: document.getElementById('pl-city').value.trim(),
+    area: document.getElementById('pl-area').value.trim(),
+    cat: currentCats.slice(),
+    wantRating: wantVal !== '' ? Number(wantVal) : null,
+    price,
+    hours,
+    certainty: document.getElementById('pl-certainty').value,
+    note: document.getElementById('pl-note').value.trim(),
+    wishlist: document.getElementById('pl-wishlist').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    links,
+    source: {
+      ai: editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].source?.ai : false,
+      user: true
+    }
+  };
+  if(lat !== '' && lng !== ''){
+    place.coords = { lat: Number(lat), lng: Number(lng) };
+    place.coordsSource = 'user';
+  }
+
+  const places = tripData.places ? tripData.places.slice() : [];
+  if(editingPlaceIdx!=null) places[editingPlaceIdx] = place;
+  else places.push(place);
+
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.places = places;
+  renderPlaces();
+  document.getElementById('place-modal').classList.add('hidden');
+}
+document.getElementById('pl-save').addEventListener('click', savePlace);
+
+async function deletePlace(idx){
+  if(!confirm(`Delete "${tripData.places[idx].name}"?`)) return;
+  const places = tripData.places.slice();
+  places.splice(idx, 1);
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  tripData.places = places;
+  renderPlaces();
+}
+
+// ---------- AI place generation (Tier 2: instruction template + paste-back JSON) ----------
+function openAiModal(){
+  document.getElementById('ai-step-setup').classList.remove('hidden');
+  document.getElementById('ai-step-instructions').classList.add('hidden');
+  document.getElementById('ai-step-preview').classList.add('hidden');
+  document.getElementById('ai-error').textContent = '';
+  document.getElementById('ai-response').value = '';
+  document.getElementById('ai-count').value = 8;
+  document.getElementById('ai-prefs').value = '';
+
+  const citySel = document.getElementById('ai-city');
+  const cities = tripData?.meta?.cities || [];
+  citySel.innerHTML = cities.length
+    ? cities.map(c=>`<option value="${c.name}">${c.name}${c.country ? ', '+c.country : ''}</option>`).join('')
+    : '<option value="">(none — optional)</option>';
+  document.getElementById('ai-no-cities-hint').classList.toggle('hidden', cities.length > 0);
+
+  // Prefill from trip details — editable here for just this batch, doesn't write back.
+  const prefs = tripData?.meta?.preferences || emptyPreferences();
+  document.getElementById('ai-num-people').value = prefs.numPeople ?? '';
+  document.getElementById('ai-base-ops').value = prefs.baseOfOperations || '';
+  document.getElementById('ai-budget-max').value = prefs.budget?.max ?? '';
+  document.getElementById('ai-budget-realistic').value = prefs.budget?.realistic ?? '';
+  document.getElementById('ai-budget-perday').value = prefs.budget?.perDay ?? '';
+  document.getElementById('ai-max-steps').value = prefs.maxStepsPerDay ?? '';
+  document.getElementById('ai-want-to-see').value = (prefs.wantToSee||[]).join('\n');
+  document.getElementById('ai-places-avoid').value = (prefs.placesToAvoid||[]).join('\n');
+  document.getElementById('ai-freetext').value = prefs.freeText || '';
+  aiTravelMethodsPicker.set(prefs.travelMethods);
+  aiCatWantPicker.set(prefs.catWant);
+  aiCatAvoidPicker.set(prefs.catAvoid);
+
+  document.getElementById('ai-modal').classList.remove('hidden');
+}
+document.getElementById('ai-open-edit-trip').addEventListener('click', ()=>{
+  closeAiModal();
+  openEditTripModal();
+});
+function closeAiModal(){ document.getElementById('ai-modal').classList.add('hidden'); }
+document.getElementById('btn-ai-generate').addEventListener('click', openAiModal);
+['ai-cancel-1','ai-cancel-2','ai-cancel-3'].forEach(id=>document.getElementById(id).addEventListener('click', closeAiModal));
+document.getElementById('ai-modal').addEventListener('click', e=>{
+  if(e.target.id === 'ai-modal') closeAiModal();
+});
+
+const AI_PLACE_SCHEMA_DOC = `Each item in the array must match this exact shape (use null for unknown optional fields; omit "coords" entirely unless you're actually confident — don't invent coordinates):
+{
+  "name": string (required — the only required field),
+  "city": string,
+  "area": string (neighborhood/district),
+  "cat": array of lowercase strings — prefer these where they fit: food, museum, park/nature, shopping, landmark, nightlife — custom tags are fine too,
+  "wantRating": integer 1-10 or null (how strongly to prioritize seeing this; above 7 means near-essential),
+  "price": { "amount": number or null, "currency": ISO 4217 code like "DKK" or null, "note": string e.g. "per person" / "Free" / "Pay per stall" },
+  "hours": { "open": "HH:MM" 24h or null, "close": "HH:MM" 24h or null, "note": string for anything a simple range can't capture, e.g. "Closed Mondays" },
+  "certainty": "green" | "yellow" | "red" (green = solidly confirmed open/available, red = uncertain),
+  "note": string (anything else worth knowing),
+  "wishlist": array of strings — specific things to see/eat/do there, not just "visit the place" (for a museum: named exhibits; for a restaurant: specific dishes),
+  "links": array of { "label": string, "url": string } for official site/booking/etc, only if real,
+  "coords": { "lat": number, "lng": number } — only if genuinely confident; this is a rough guess only and gets independently verified later
+}`;
+
+function buildAiInstruction(){
+  const city = document.getElementById('ai-city').value;
+  const count = document.getElementById('ai-count').value || '8';
+  const batchNotes = document.getElementById('ai-prefs').value.trim();
+  const meta = tripData?.meta || {};
+  const existingNames = (tripData?.places||[]).map(p=>p.name).filter(Boolean);
+
+  const numVal = v => v === '' ? null : Number(v);
+  const prefs = {
+    numPeople: numVal(document.getElementById('ai-num-people').value),
+    baseOfOperations: document.getElementById('ai-base-ops').value.trim(),
+    budget: {
+      max: numVal(document.getElementById('ai-budget-max').value),
+      realistic: numVal(document.getElementById('ai-budget-realistic').value),
+      perDay: numVal(document.getElementById('ai-budget-perday').value)
+    },
+    maxStepsPerDay: numVal(document.getElementById('ai-max-steps').value),
+    travelMethods: aiTravelMethodsPicker.get(),
+    catWant: aiCatWantPicker.get(),
+    catAvoid: aiCatAvoidPicker.get(),
+    wantToSee: document.getElementById('ai-want-to-see').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    placesToAvoid: document.getElementById('ai-places-avoid').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    freeText: document.getElementById('ai-freetext').value.trim()
+  };
+
+  const lines = [];
+  lines.push(`I'm planning a trip${meta.name ? ` ("${meta.name}")` : ''}. Suggest specific, real, visitable places — not generic categories.`);
+  if(city) lines.push(`Destination for this batch: ${city}.`);
+  const dateRange = formatDateRange(meta.startDate, meta.endDate);
+  if(dateRange) lines.push(`Trip dates: ${dateRange}.`);
+  if(prefs.numPeople) lines.push(`Number of people: ${prefs.numPeople}.`);
+  if(prefs.baseOfOperations) lines.push(`Based near: ${prefs.baseOfOperations}.`);
+  if(prefs.budget.max || prefs.budget.realistic || prefs.budget.perDay){
+    const cur = meta.defaultCurrency || '';
+    const parts = [];
+    if(prefs.budget.max) parts.push(`max ${prefs.budget.max} ${cur}`);
+    if(prefs.budget.realistic) parts.push(`realistically aiming for ${prefs.budget.realistic} ${cur}`);
+    if(prefs.budget.perDay) parts.push(`~${prefs.budget.perDay} ${cur}/day`);
+    lines.push(`Budget: ${parts.join(', ')}.`);
+  }
+  if(prefs.maxStepsPerDay) lines.push(`Prefers no more than about ${prefs.maxStepsPerDay} steps/day — weight suggestions accordingly.`);
+  if(prefs.travelMethods.length) lines.push(`Getting around by: ${prefs.travelMethods.join(', ')}.`);
+  if(prefs.catWant.length) lines.push(`Especially interested in: ${prefs.catWant.join(', ')}.`);
+  if(prefs.catAvoid.length) lines.push(`Not interested in: ${prefs.catAvoid.join(', ')}.`);
+  if(prefs.wantToSee.length) lines.push(`Already knows they want (include only if genuinely relevant, don't just repeat these back): ${prefs.wantToSee.join(', ')}.`);
+  if(prefs.placesToAvoid.length) lines.push(`Avoid suggesting: ${prefs.placesToAvoid.join(', ')}.`);
+  if(prefs.freeText) lines.push(`Other preferences: ${prefs.freeText}`);
+  lines.push(`Generate roughly ${count} places for this batch.`);
+  if(batchNotes) lines.push(`Notes specific to this batch only: ${batchNotes}`);
+  if(existingNames.length) lines.push(`Do NOT include any of these — they're already on the list: ${existingNames.join(', ')}.`);
+  lines.push('');
+  lines.push(AI_PLACE_SCHEMA_DOC);
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+document.getElementById('ai-build').addEventListener('click', ()=>{
+  document.getElementById('ai-instructions').value = buildAiInstruction();
+  document.getElementById('ai-step-instructions').classList.remove('hidden');
+});
+
+document.getElementById('ai-copy').addEventListener('click', async ()=>{
+  const btn = document.getElementById('ai-copy');
+  try{
+    await navigator.clipboard.writeText(document.getElementById('ai-instructions').value);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }catch(err){
+    alert('Could not copy automatically — select the text and copy manually.');
+  }
+});
+
+function validateAiResponse(){
+  const errEl = document.getElementById('ai-error');
+  errEl.textContent = '';
+  let parsed;
+  try{
+    parsed = JSON.parse(document.getElementById('ai-response').value);
+  }catch(err){
+    errEl.textContent = 'Could not parse as JSON: ' + err.message;
+    return null;
+  }
+  if(!Array.isArray(parsed)){
+    errEl.textContent = 'Expected a JSON array of place objects at the top level.';
+    return null;
+  }
+  const errors = [];
+  const places = [];
+  parsed.forEach((item, i)=>{
+    if(typeof item !== 'object' || item === null || Array.isArray(item)){
+      errors.push(`Item ${i+1}: not an object.`);
+      return;
+    }
+    const name = (item.name||'').toString().trim();
+    if(!name){ errors.push(`Item ${i+1}: missing "name".`); return; }
+    const place = {
+      id: slugify(name),
+      name,
+      city: (item.city||'').toString(),
+      area: (item.area||'').toString(),
+      cat: Array.isArray(item.cat) ? item.cat.filter(c=>typeof c==='string').map(c=>c.toLowerCase()) : [],
+      wantRating: Number.isInteger(item.wantRating) && item.wantRating>=1 && item.wantRating<=10 ? item.wantRating : null,
+      price: {
+        amount: typeof item.price?.amount === 'number' ? item.price.amount : null,
+        currency: typeof item.price?.currency === 'string' ? item.price.currency : null,
+        note: typeof item.price?.note === 'string' ? item.price.note : ''
+      },
+      hours: {
+        open: typeof item.hours?.open === 'string' ? item.hours.open : null,
+        close: typeof item.hours?.close === 'string' ? item.hours.close : null,
+        note: typeof item.hours?.note === 'string' ? item.hours.note : ''
+      },
+      certainty: ['green','yellow','red'].includes(item.certainty) ? item.certainty : 'yellow',
+      note: typeof item.note === 'string' ? item.note : '',
+      wishlist: Array.isArray(item.wishlist) ? item.wishlist.filter(w=>typeof w==='string') : [],
+      links: Array.isArray(item.links) ? item.links.filter(l=>l && l.label && l.url).map(l=>({label:String(l.label), url:String(l.url)})) : [],
+      source: { ai: true, user: false }
+    };
+    if(item.coords && typeof item.coords.lat === 'number' && typeof item.coords.lng === 'number'){
+      place.coords = { lat: item.coords.lat, lng: item.coords.lng };
+      place.coordsSource = 'ai';
+    }
+    places.push(place);
+  });
+  if(errors.length){
+    errEl.textContent = `Found ${errors.length} problem(s):\n` + errors.join('\n');
+    return null;
+  }
+  if(!places.length){
+    errEl.textContent = 'No places found in the response.';
+    return null;
+  }
+  return places;
+}
+
+let aiPreviewPlaces = [];
+document.getElementById('ai-validate').addEventListener('click', ()=>{
+  const places = validateAiResponse();
+  if(!places) return;
+  aiPreviewPlaces = places;
+  renderAiPreview();
+  document.getElementById('ai-step-preview').classList.remove('hidden');
+});
+
+function renderAiPreview(){
+  const existingNames = new Set((tripData?.places||[]).map(p=>(p.name||'').trim().toLowerCase()));
+  const el = document.getElementById('ai-preview-list');
+  el.innerHTML = aiPreviewPlaces.map((p, i)=>{
+    const isDup = existingNames.has((p.name||'').trim().toLowerCase());
+    const meta = [p.city, p.area, formatPriceBase(p.price)].filter(Boolean).join(' · ');
+    return `<label class="ai-preview-row">
+      <input type="checkbox" class="ai-preview-check" data-idx="${i}" ${isDup?'':'checked'}>
+      <div>
+        <div class="place-name">${p.name}${isDup?' <span class="badge b-red">Possible duplicate</span>':''}</div>
+        ${meta ? `<div class="place-meta">${meta}</div>` : ''}
+      </div>
+    </label>`;
+  }).join('');
+}
+
+document.getElementById('ai-import').addEventListener('click', async ()=>{
+  const checked = Array.from(document.querySelectorAll('.ai-preview-check:checked')).map(cb=>Number(cb.dataset.idx));
+  if(!checked.length){ closeAiModal(); return; }
+  const toAdd = checked.map(i=>aiPreviewPlaces[i]);
+  const places = (tripData.places || []).concat(toAdd);
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.places = places;
+  renderPlaces();
+  closeAiModal();
+});
 </script>
 </body>
 </html>
