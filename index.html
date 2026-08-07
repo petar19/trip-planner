@@ -6,6 +6,8 @@
 <title>Our Trips</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{
     --paper:#F6F3EC; --paper-raised:#FFFFFF; --ink:#1C2B39; --ink-soft:#4B5B68; --line:#DDD6C7;
@@ -51,7 +53,9 @@
   .empty-state{text-align:center; padding:60px 20px; color:var(--ink-soft);}
 
   /* Modal */
-  .modal-backdrop{position:fixed; inset:0; background:rgba(28,43,57,.5); display:flex; align-items:center; justify-content:center; z-index:100;}
+  /* Above Leaflet's own control/pane z-indexes (up to ~1000), so a modal never renders behind a
+     map left open on the page underneath it. */
+  .modal-backdrop{position:fixed; inset:0; background:rgba(28,43,57,.5); display:flex; align-items:center; justify-content:center; z-index:1100;}
   .modal-box{background:var(--paper-raised); border-radius:16px; padding:28px 30px; width:420px; max-width:90vw; max-height:85vh; overflow-y:auto;}
   .modal-box h3{margin-bottom:16px;}
   .modal-box label{display:block; font-size:.8rem; font-weight:600; color:var(--ink-soft); margin:14px 0 5px;}
@@ -70,9 +74,12 @@
   @media (max-width:600px){ .modal-grid{grid-template-columns:1fr;} }
   .field-row-simple{display:flex; gap:12px;}
   .field-row-simple > div{flex:1;}
+  .autocomplete-list{position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--line); border-radius:8px; margin-top:2px; max-height:220px; overflow-y:auto; z-index:30; box-shadow:0 4px 12px rgba(0,0,0,.1);}
+  .autocomplete-item{padding:8px 12px; font-size:.82rem; cursor:pointer;}
+  .autocomplete-item:hover{background:var(--paper);}
   .link-row{display:flex; gap:8px; margin-top:8px;}
   .link-row input{flex:1;}
-  .link-row button, #pl-add-link{background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; padding:8px 10px; font-size:.82rem;}
+  .link-row button, #pl-add-link, .pl-add-link-preset{background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; padding:8px 10px; font-size:.82rem;}
   #pl-add-link{margin-top:8px;}
 
   /* Tabs */
@@ -80,6 +87,52 @@
   nav.tabs button{font-weight:600; font-size:.82rem; background:transparent; border:1px solid transparent; color:var(--ink-soft); padding:8px 14px; border-radius:20px; cursor:pointer;}
   nav.tabs button.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
   section.panel{display:none;} section.panel.active{display:block;}
+  #map-container{height:min(65vh, 560px); border-radius:14px; overflow:hidden; border:1px solid var(--line);}
+
+  /* Places + Map split view */
+  #places-split{display:flex; gap:20px; align-items:flex-start;}
+  .places-pane{flex:1; min-width:0;}
+  #places-map-pane{position:sticky; top:76px;}
+  .pane-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .pane-title{font-family:'Fraunces',serif; font-weight:600; color:var(--ink-soft); font-size:.85rem; text-transform:uppercase; letter-spacing:.03em;}
+  .pane-maximize-btn{background:transparent; border:1px solid var(--line); border-radius:6px; color:var(--ink-soft); cursor:pointer; padding:3px 8px; font-size:.9rem; line-height:1;}
+  #places-split.mode-list #places-map-pane{display:none;}
+  #places-split.mode-map #places-list-pane{display:none;}
+  .place-row.highlighted{background:var(--harbor-soft); border-radius:8px; padding-left:8px; padding-right:8px; margin-left:-8px; margin-right:-8px;}
+  @media (max-width:900px){
+    #places-split{flex-direction:column;}
+    #places-map-pane{order:1; position:sticky; top:52px; z-index:20; background:var(--paper); width:100%; padding-bottom:10px;}
+    #places-list-pane{order:2;}
+    #places-map-pane #map-container{height:200px;}
+    #places-split.mode-map #places-map-pane #map-container{height:65vh;}
+  }
+
+  /* Expanded route split view — same list+map idea as Places, scoped to one route */
+  .route-split{display:flex; gap:20px; align-items:flex-start; margin-top:14px;}
+  .route-split-pane{flex:1; min-width:0;}
+  .route-map-container{height:min(50vh, 420px); border-radius:14px; overflow:hidden; border:1px solid var(--line);}
+  .route-stop-row.highlighted{background:var(--harbor-soft); border-radius:8px; padding-left:8px; padding-right:8px; margin-left:-8px; margin-right:-8px;}
+  @media (max-width:900px){
+    .route-split{flex-direction:column;}
+    .route-map-container{height:220px;}
+  }
+
+  /* Route editor: form on the left, a live map on the right that updates as stops change */
+  .route-editor-layout{display:flex; gap:20px; align-items:flex-start;}
+  .route-editor-form{flex:1.3; min-width:0;}
+  .route-editor-map-pane{flex:1; min-width:280px; position:sticky; top:0;}
+  @media (max-width:900px){
+    .route-editor-layout{flex-direction:column;}
+    .route-editor-map-pane{width:100%; position:static;}
+  }
+
+  /* Day-by-day: Level 2 route overview reuses .route-split/.route-stop-row; sticky map + a
+     completed-stop marker are the only additions this view needs on top of that. */
+  .day-route-map-pane{position:sticky; top:76px;}
+  .route-stop-row.stop-done{background:var(--moss-soft);}
+  .route-stop-row.stop-done .place-name{color:var(--moss);}
+  @media (max-width:900px){ .day-route-map-pane{position:static;} }
+  #days-day-select{padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; background:#fff;}
 
   /* Places */
   .place-row{padding:14px 0; border-bottom:1px solid var(--line);} .place-row:last-child{border-bottom:none;}
@@ -91,6 +144,12 @@
   .b-green{background:var(--moss-soft); color:var(--moss);} .b-yellow{background:var(--mustard-soft); color:#8a6a1f;} .b-red{background:#F6E3DF; color:var(--red);}
   .coords-tag{font-family:'JetBrains Mono',monospace; font-size:.7rem; color:var(--ink-soft); background:var(--paper); border:1px solid var(--line); padding:1px 7px; border-radius:10px;}
   .source-icon{font-size:.85rem; cursor:default; margin-left:2px;}
+  .place-thumb{width:60px; height:60px; border-radius:10px; object-fit:cover; cursor:pointer; flex-shrink:0; background:var(--line);}
+  .place-thumb-loading{width:60px; height:60px; border-radius:10px; background:var(--line); flex-shrink:0; opacity:.5;}
+  .place-thumb-empty{width:60px; height:60px; border-radius:10px; flex-shrink:0; border:1px dashed var(--line); color:var(--ink-soft); display:flex; align-items:center; justify-content:center; font-size:1.4rem; cursor:pointer; background:var(--paper-raised);}
+  .place-thumb-empty:hover{border-color:var(--harbor); color:var(--harbor);}
+  #photo-lightbox{cursor:zoom-out;}
+  #photo-lightbox-img{max-width:90vw; max-height:90vh; border-radius:12px; object-fit:contain;}
   a.place-link{font-size:.78rem; margin-right:12px;}
   .place-actions{display:flex; gap:8px; margin-top:8px;}
   .place-actions button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
@@ -102,6 +161,7 @@
   .ai-preview-row:last-child{border-bottom:none;}
   .ai-preview-row input[type=checkbox]{margin-top:3px; width:16px; height:16px; accent-color:var(--harbor); cursor:pointer;}
   .ai-preview-row .place-meta{margin-top:1px;}
+  #coords-pending-count{font-family:'JetBrains Mono',monospace; font-size:.72rem; margin-left:4px;}
 
   /* Category chips */
   .cat-picker{display:flex; flex-wrap:wrap; gap:6px;}
@@ -145,6 +205,7 @@
   <nav class="tabs hidden" id="tabs">
     <button data-tab="overview" class="active">Overview</button>
     <button data-tab="places">Places</button>
+    <button data-tab="routes">Routes</button>
     <button data-tab="events">Events</button>
     <button data-tab="days">Day-by-day</button>
     <button data-tab="budget">Budget</button>
@@ -159,7 +220,11 @@
         <p id="tv-dates" class="mono"></p>
         <div id="tv-cities"></div>
         <p id="tv-summary"></p>
-        <button class="btn-small" id="btn-edit-trip">Edit trip details</button>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+          <button class="btn-small" id="btn-edit-trip">Edit trip details</button>
+          <button class="btn-small" id="btn-copy-trip">Copy this trip…</button>
+          <button id="btn-delete-trip" style="background:var(--red); color:white; border:none; padding:8px 14px; border-radius:8px; cursor:pointer; font-weight:600; font-size:.85rem;">Delete this trip</button>
+        </div>
       </div>
     </section>
 
@@ -167,54 +232,59 @@
       <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
         <button class="primary" id="btn-add-place">+ Add place</button>
         <button id="btn-ai-generate" class="btn-small">✨ Generate with AI</button>
+        <button id="btn-check-coords" class="btn-small">📍 Check coordinates<span id="coords-pending-count"></span></button>
       </div>
-      <div id="cat-filter" class="cat-picker" style="margin-bottom:10px;"></div>
-      <div id="source-filter" class="cat-picker" style="margin-bottom:16px;"></div>
-      <div id="places-list"></div>
+
+      <div id="places-split">
+        <div id="places-list-pane" class="places-pane">
+          <div class="pane-header">
+            <span class="pane-title">Places <span id="places-count" class="mono" style="text-transform:none; font-weight:400;"></span></span>
+            <button type="button" class="pane-maximize-btn" data-mode="list" title="Maximize list">⤢</button>
+          </div>
+          <input type="text" id="places-search" placeholder="Search places… (space-separated keywords, matches anything)" autocomplete="off" style="width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; margin-bottom:10px; box-sizing:border-box;">
+          <div id="cat-filter" class="cat-picker" style="margin-bottom:10px;"></div>
+          <div id="source-filter" class="cat-picker" style="margin-bottom:16px;"></div>
+          <div id="coords-fixer-card" class="hidden"></div>
+          <div id="places-list"></div>
+        </div>
+        <div id="places-map-pane" class="places-pane">
+          <div class="pane-header">
+            <span class="pane-title">Map</span>
+            <button type="button" class="pane-maximize-btn" data-mode="map" title="Maximize map">⤢</button>
+          </div>
+          <div id="map-container"></div>
+          <p id="map-empty" class="hint hidden" style="margin-top:10px;">No places have coordinates yet — use "📍 Check coordinates" above.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-routes">
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+        <button class="primary" id="btn-add-route">+ Add route manually</button>
+        <button id="btn-generate-routes" class="btn-small">✨ Generate routes with AI</button>
+      </div>
+      <div id="routes-list"></div>
     </section>
 
     <section class="panel" id="p-events"><p class="mono">Not built yet.</p></section>
-    <section class="panel" id="p-days"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-days">
+      <div style="margin-bottom:16px;">
+        <label for="days-day-select">Day</label>
+        <select id="days-day-select"></select>
+      </div>
+      <div id="days-route-picker" class="cat-picker" style="margin-bottom:16px;"></div>
+      <div id="days-content"></div>
+    </section>
     <section class="panel" id="p-budget"><p class="mono">Not built yet.</p></section>
     <section class="panel" id="p-documents"><p class="mono">Not built yet.</p></section>
     <section class="panel" id="p-manage"><p class="mono">Not built yet.</p></section>
   </main>
 </div>
 
-<!-- ============ NEW TRIP MODAL ============ -->
-<div id="new-trip-modal" class="modal-backdrop hidden">
-  <div class="modal-box">
-    <h3>New trip</h3>
-    <label for="nt-name">Name <span style="color:var(--red);">*</span></label>
-    <input id="nt-name" placeholder='e.g. "Rome, spring 2027"'>
-    <div class="field-row-simple">
-      <div>
-        <label for="nt-start-date">Start date (optional)</label>
-        <input id="nt-start-date" type="date">
-      </div>
-      <div>
-        <label for="nt-end-date">End date (optional)</label>
-        <input id="nt-end-date" type="date">
-      </div>
-    </div>
-    <label for="nt-cities">Cities (optional)</label>
-    <input id="nt-cities" placeholder='e.g. "Rome, Italy; Florence, Italy"'>
-    <p class="hint">Separate multiple cities with a semicolon, each as "City, Country".</p>
-    <label for="nt-currency">Default currency (optional)</label>
-    <select id="nt-currency"></select>
-    <p class="hint">Used to show converted prices next to place/food costs entered in other currencies.</p>
-    <div id="nt-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
-    <div class="modal-actions">
-      <button class="btn-cancel" id="nt-cancel">Cancel</button>
-      <button class="btn-save" id="nt-save">Create trip</button>
-    </div>
-  </div>
-</div>
-
-<!-- ============ EDIT TRIP DETAILS MODAL ============ -->
+<!-- ============ TRIP DETAILS MODAL (New trip / Edit trip details) ============ -->
 <div id="edit-trip-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="width:700px;">
-    <h3>Edit trip details</h3>
+    <h3 id="et-modal-title">Edit trip details</h3>
     <div class="modal-grid">
       <div class="span-2">
         <label for="et-name">Name <span style="color:var(--red);">*</span></label>
@@ -239,13 +309,19 @@
         <input id="et-num-people" type="number" min="1">
       </div>
 
-      <div>
-        <label for="et-base-ops">Base of operations (optional)</label>
-        <input id="et-base-ops" placeholder="e.g. hotel name/area">
+      <div id="et-base-field" style="position:relative;">
+        <label for="et-base-search">Base of operations (optional)</label>
+        <input id="et-base-search" placeholder="Search for an address…" autocomplete="off">
+        <div id="et-base-suggestions" class="autocomplete-list hidden"></div>
+        <p id="et-base-selected" class="hint" style="margin-top:4px;"></p>
       </div>
       <div>
         <label for="et-max-steps">Max steps per day (optional)</label>
         <input id="et-max-steps" type="number" min="0" step="500">
+      </div>
+      <div>
+        <label for="et-stops-per-route">Target stops per route (optional)</label>
+        <input id="et-stops-per-route" type="number" min="1" placeholder="e.g. 5">
       </div>
 
       <div class="span-2">
@@ -312,6 +388,16 @@
           <button type="button" id="et-catavoid-add" class="btn-small">+ Add</button>
         </div>
       </div>
+    </div>
+    <div id="et-copy-places-section" class="hidden" style="margin-top:16px;">
+      <div class="pane-header">
+        <label style="margin:0;">Places to copy</label>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn-small" id="et-copy-select-all">Select all</button>
+          <button type="button" class="btn-small" id="et-copy-select-none">Deselect all</button>
+        </div>
+      </div>
+      <div id="et-copy-places-list" style="max-height:240px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px 12px;"></div>
     </div>
     <div id="et-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
     <div class="modal-actions">
@@ -415,7 +501,13 @@
       <div class="span-2">
         <label>Links (optional)</label>
         <div id="pl-links-list"></div>
-        <button id="pl-add-link" type="button">+ Add link</button>
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <button id="pl-add-link" type="button">+ Add link</button>
+          <button type="button" class="pl-add-link-preset" data-label="Official site">+ Official site</button>
+          <button type="button" class="pl-add-link-preset" data-label="Thumbnail">+ Thumbnail</button>
+          <button type="button" class="pl-add-link-preset" data-label="Map">+ Map</button>
+        </div>
+        <p class="hint">A link labeled "Thumbnail" becomes this place's photo instead of showing in the list above.</p>
       </div>
     </div>
     <div id="pl-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
@@ -541,6 +633,124 @@
   </div>
 </div>
 
+<!-- ============ AI ROUTE GENERATION ============ -->
+<div id="routes-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:700px;">
+    <h3>Generate routes with AI</h3>
+
+    <div id="routes-step-setup">
+      <div id="routes-no-cities-hint" class="hidden" style="background:var(--mustard-soft); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.85rem;">
+        This trip has no cities set yet. <button type="button" class="btn-small" id="routes-open-edit-trip" style="padding:3px 10px;">Edit trip details</button>
+      </div>
+      <div class="modal-grid">
+        <div>
+          <label for="routes-city">City</label>
+          <select id="routes-city"></select>
+        </div>
+        <div>
+          <label for="routes-count">How many candidate routes</label>
+          <input id="routes-count" type="number" min="1" max="10" value="3">
+        </div>
+
+        <div>
+          <label for="routes-max-steps">Max steps per day (optional)</label>
+          <input id="routes-max-steps" type="number" min="0" step="500">
+        </div>
+        <div>
+          <label for="routes-stops-per-route">Target stops per route (optional)</label>
+          <input id="routes-stops-per-route" type="number" min="1" placeholder="e.g. 5">
+        </div>
+        <div>
+          <label>Travel methods (optional)</label>
+          <div id="routes-travel-methods" class="cat-picker"></div>
+        </div>
+
+        <div class="span-2">
+          <label for="routes-notes">Anything specific to this batch (optional)</label>
+          <textarea id="routes-notes" placeholder="e.g. keep mornings light, group museums together, avoid too much backtracking"></textarea>
+        </div>
+      </div>
+      <p id="routes-eligible-hint" class="hint" style="margin-top:4px;"></p>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="routes-cancel-1">Cancel</button>
+        <button class="btn-save" id="routes-build">Generate instructions</button>
+      </div>
+    </div>
+
+    <div id="routes-step-instructions" class="hidden">
+      <label for="routes-instructions">Instructions — copy this to your AI of choice</label>
+      <textarea id="routes-instructions" readonly style="min-height:180px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn-small" id="routes-copy">Copy to clipboard</button>
+      </div>
+      <label for="routes-response" style="margin-top:20px;">Paste the AI's JSON response here</label>
+      <textarea id="routes-response" placeholder="[ { &quot;label&quot;: ... }, ... ]" style="min-height:140px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div id="routes-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="routes-cancel-2">Cancel</button>
+        <button class="btn-save" id="routes-validate">Validate &amp; preview</button>
+      </div>
+    </div>
+
+    <div id="routes-step-preview" class="hidden">
+      <p class="hint" style="margin-bottom:10px;">Review before importing.</p>
+      <div id="routes-preview-list"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="routes-cancel-3">Cancel</button>
+        <button class="btn-save" id="routes-import">Import selected</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MANUAL ROUTE EDITOR ============ -->
+<div id="route-editor-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:1140px; max-width:95vw;">
+    <h3 id="route-editor-title">Add route</h3>
+
+    <div class="route-editor-layout">
+      <div class="route-editor-form">
+        <div class="modal-grid">
+          <div>
+            <label for="route-editor-city">City</label>
+            <select id="route-editor-city"></select>
+          </div>
+          <div>
+            <label for="route-editor-label">Route label</label>
+            <input id="route-editor-label" placeholder="e.g. Old Town Highlights">
+          </div>
+        </div>
+
+        <div id="route-editor-stops" style="margin-top:18px;"></div>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start;">
+          <div style="flex:1; min-width:220px; position:relative;">
+            <input type="text" id="route-editor-add-search" placeholder="Search this city's places to add… (click to see all)" autocomplete="off">
+            <div id="route-editor-add-results" class="autocomplete-list hidden"></div>
+          </div>
+          <button type="button" class="btn-small" id="route-editor-add-break">+ Add break</button>
+        </div>
+
+        <div id="route-editor-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
+      </div>
+      <div class="route-editor-map-pane">
+        <div class="pane-title" style="margin-bottom:8px;">Map</div>
+        <div class="route-map-container" id="route-editor-map"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="route-editor-cancel">Cancel</button>
+      <button class="btn-save" id="route-editor-save">Save route</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PHOTO LIGHTBOX ============ -->
+<div id="photo-lightbox" class="modal-backdrop hidden">
+  <img id="photo-lightbox-img" src="" alt="">
+</div>
+
 <!-- ============ FIREBASE SDK ============ -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -596,7 +806,6 @@ function populateCurrencySelect(sel, withBlank){
   sel.innerHTML = (withBlank ? '<option value="">No default (skip conversion)</option>' : '')
     + CURRENCY_CODES.map(c=>`<option value="${c}">${c}</option>`).join('');
 }
-populateCurrencySelect(document.getElementById('nt-currency'), true);
 
 let ratesCache = {};
 async function getRate(from, to){
@@ -699,75 +908,14 @@ function formatDateRange(startIso, endIso){
   return `${one.d} ${MONTH_ABBR[one.m-1]} ${one.y}`;
 }
 
-// City input like "Copenhagen, Denmark; Malmö, Sweden" -> index strings + meta objects
-function parseCities(input){
-  const parts = input.split(';').map(s=>s.trim()).filter(Boolean);
-  const index = [];
-  const meta = [];
-  parts.forEach(p=>{
-    const [name, country] = p.split(',').map(s=>s.trim());
-    index.push(country ? `${name}, ${country}` : name);
-    meta.push({name, country: country||'', dateRangeWithinTrip: ''});
-  });
-  return {index, meta};
-}
-
-function openNewTripModal(){
-  document.getElementById('nt-name').value = '';
-  document.getElementById('nt-start-date').value = '';
-  document.getElementById('nt-end-date').value = '';
-  document.getElementById('nt-cities').value = '';
-  document.getElementById('nt-currency').value = '';
-  document.getElementById('nt-error').textContent = '';
-  document.getElementById('new-trip-modal').classList.remove('hidden');
-  document.getElementById('nt-name').focus();
-}
-function closeNewTripModal(){
-  document.getElementById('new-trip-modal').classList.add('hidden');
-}
-document.getElementById('btn-new-trip').addEventListener('click', openNewTripModal);
-document.getElementById('btn-new-trip-empty').addEventListener('click', openNewTripModal);
-document.getElementById('nt-cancel').addEventListener('click', closeNewTripModal);
-document.getElementById('new-trip-modal').addEventListener('click', e=>{
-  if(e.target.id === 'new-trip-modal') closeNewTripModal();
-});
-
 function emptyPreferences(){
   return {
-    freeText: '', numPeople: null, baseOfOperations: '',
+    freeText: '', numPeople: null,
     budget: { max: null, realistic: null, perDay: null },
-    maxStepsPerDay: null, travelMethods: [],
+    maxStepsPerDay: null, stopsPerRoute: null, travelMethods: [],
     wantToSee: [], placesToAvoid: [], catWant: [], catAvoid: []
   };
 }
-
-async function createTrip(){
-  const name = document.getElementById('nt-name').value.trim();
-  const errEl = document.getElementById('nt-error');
-  if(!name){ errEl.textContent = 'Name is required.'; return; }
-  const startDate = document.getElementById('nt-start-date').value || null;
-  const endDate = document.getElementById('nt-end-date').value || null;
-  const citiesInput = document.getElementById('nt-cities').value.trim();
-  const {index: citiesIndex, meta: citiesMeta} = parseCities(citiesInput);
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '-' + Date.now().toString(36);
-
-  await db.collection('trips').doc(slug).set({
-    name, startDate, endDate, cities: citiesIndex,
-    ownerEmail: currentUser.email,
-    participants: [currentUser.email],
-    updatedAt: Date.now()
-  });
-  const defaultCurrency = document.getElementById('nt-currency').value;
-  await db.collection('tripData').doc(slug).set({
-    meta: { name, startDate, endDate, cities: citiesMeta, summary: '', defaultCurrency, preferences: emptyPreferences() },
-    places: [], routes: [], days: [], events: [], budget: []
-  });
-  await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
-
-  closeNewTripModal();
-  loadTrip(slug);
-}
-document.getElementById('nt-save').addEventListener('click', createTrip);
 
 // ---------- Load a trip ----------
 let tripData = null;
@@ -871,9 +1019,85 @@ const aiTravelMethodsPicker = makeChipPicker('ai-travel-methods', TRAVEL_METHODS
 const aiCatWantPicker = makeCatPicker('ai-catwant-chips', 'ai-catwant-add', 'ai-catwant-custom');
 const aiCatAvoidPicker = makeCatPicker('ai-catavoid-chips', 'ai-catavoid-add', 'ai-catavoid-custom');
 
-function openEditTripModal(){
-  const meta = tripData?.meta || {};
+// ---------- Base of operations: address autocomplete (Nominatim), backed by a cat:["base"] place ----------
+let etBaseSelection = null; // { address, lat, lng } | null
+let etBaseDebounce = null;
+
+function findBasePlace(){
+  return (tripData?.places || []).find(p => (p.cat||[]).includes('base')) || null;
+}
+
+document.getElementById('et-base-search').addEventListener('input', e=>{
+  clearTimeout(etBaseDebounce);
+  etBaseSelection = null;
+  document.getElementById('et-base-selected').textContent = '';
+  const q = e.target.value.trim();
+  if(q.length < 3){ document.getElementById('et-base-suggestions').classList.add('hidden'); return; }
+  etBaseDebounce = setTimeout(async ()=>{
+    const results = await nominatimSearchMulti(q);
+    renderBaseSuggestions(results);
+  }, 700); // debounced — Nominatim's usage policy discourages firing a query per keystroke
+});
+
+async function nominatimSearchMulti(query){
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    return data.map(r => ({ address: r.display_name, lat: Number(r.lat), lng: Number(r.lon) }));
+  }catch(err){
+    console.warn('Address search failed:', err);
+    return [];
+  }
+}
+
+function renderBaseSuggestions(results){
+  const el = document.getElementById('et-base-suggestions');
+  if(!results.length){ el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.innerHTML = results.map((r,i)=>`<div class="autocomplete-item" data-i="${i}">${r.address}</div>`).join('');
+  el.__results = results;
+  el.classList.remove('hidden');
+}
+document.getElementById('et-base-suggestions').addEventListener('click', e=>{
+  const item = e.target.closest('.autocomplete-item');
+  if(!item) return;
+  const el = document.getElementById('et-base-suggestions');
+  etBaseSelection = el.__results[Number(item.dataset.i)];
+  document.getElementById('et-base-search').value = etBaseSelection.address;
+  document.getElementById('et-base-selected').textContent = `${etBaseSelection.lat.toFixed(4)}, ${etBaseSelection.lng.toFixed(4)}`;
+  el.classList.add('hidden');
+});
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#et-base-search') && !e.target.closest('#et-base-suggestions')){
+    document.getElementById('et-base-suggestions').classList.add('hidden');
+  }
+});
+
+let tripModalMode = 'new'; // 'new' | 'edit' | 'copy'
+
+function renderCopyPlacesChecklist(){
+  const el = document.getElementById('et-copy-places-list');
+  const places = tripData?.places || [];
+  if(!places.length){ el.innerHTML = '<p class="hint">No places on this trip yet.</p>'; return; }
+  el.innerHTML = places.map((p,i)=>`<label class="ai-preview-row" style="cursor:pointer;">
+    <input type="checkbox" class="et-copy-place-check" data-idx="${i}" checked>
+    <div class="place-name" style="font-size:.92rem;">${p.name}</div>
+  </label>`).join('');
+}
+document.getElementById('et-copy-select-all').addEventListener('click', ()=>{
+  document.querySelectorAll('.et-copy-place-check').forEach(cb=>cb.checked = true);
+});
+document.getElementById('et-copy-select-none').addEventListener('click', ()=>{
+  document.querySelectorAll('.et-copy-place-check').forEach(cb=>cb.checked = false);
+});
+
+function openEditTripModal(mode){
+  tripModalMode = mode;
+  const meta = mode === 'new' ? {} : (tripData?.meta || {});
   const prefs = meta.preferences || emptyPreferences();
+  const titles = { new: 'New trip', edit: 'Edit trip details', copy: 'Copy trip' };
+  const saveLabels = { new: 'Create trip', edit: 'Save trip details', copy: 'Create copy' };
+  document.getElementById('et-modal-title').textContent = titles[mode];
+  document.getElementById('et-save').textContent = saveLabels[mode];
   document.getElementById('et-error').textContent = '';
   document.getElementById('et-name').value = meta.name || '';
   document.getElementById('et-start-date').value = meta.startDate || '';
@@ -881,8 +1105,8 @@ function openEditTripModal(){
   populateCurrencySelect(document.getElementById('et-currency'), true);
   document.getElementById('et-currency').value = meta.defaultCurrency || '';
   document.getElementById('et-num-people').value = prefs.numPeople ?? '';
-  document.getElementById('et-base-ops').value = prefs.baseOfOperations || '';
   document.getElementById('et-max-steps').value = prefs.maxStepsPerDay ?? '';
+  document.getElementById('et-stops-per-route').value = prefs.stopsPerRoute ?? '';
   document.getElementById('et-budget-max').value = prefs.budget?.max ?? '';
   document.getElementById('et-budget-realistic').value = prefs.budget?.realistic ?? '';
   document.getElementById('et-budget-perday').value = prefs.budget?.perDay ?? '';
@@ -891,6 +1115,16 @@ function openEditTripModal(){
   document.getElementById('et-want-to-see').value = (prefs.wantToSee||[]).join('\n');
   document.getElementById('et-places-avoid').value = (prefs.placesToAvoid||[]).join('\n');
 
+  // Shown (and editable) in copy mode too, prefilled from the source trip's base — so it's
+  // transparent that a base is coming along, and changeable for this copy without having to
+  // edit it again afterward. Saved the same way as edit/new: see saveTripDetails.
+  document.getElementById('et-base-field').classList.remove('hidden');
+  const basePlace = mode === 'new' ? null : findBasePlace();
+  etBaseSelection = basePlace ? { address: basePlace.note || basePlace.name, lat: basePlace.coords?.lat, lng: basePlace.coords?.lng } : null;
+  document.getElementById('et-base-search').value = basePlace ? (basePlace.note || basePlace.name) : '';
+  document.getElementById('et-base-selected').textContent = basePlace?.coords ? `${basePlace.coords.lat.toFixed(4)}, ${basePlace.coords.lng.toFixed(4)}` : '';
+  document.getElementById('et-base-suggestions').classList.add('hidden');
+
   document.getElementById('et-cities-list').innerHTML = '';
   (meta.cities||[]).forEach(c=>addCityRow(c.name, c.country));
 
@@ -898,9 +1132,16 @@ function openEditTripModal(){
   catWantPicker.set(prefs.catWant);
   catAvoidPicker.set(prefs.catAvoid);
 
+  document.getElementById('et-copy-places-section').classList.toggle('hidden', mode !== 'copy');
+  if(mode === 'copy') renderCopyPlacesChecklist();
+
   document.getElementById('edit-trip-modal').classList.remove('hidden');
+  document.getElementById('et-name').focus();
 }
-document.getElementById('btn-edit-trip').addEventListener('click', openEditTripModal);
+document.getElementById('btn-new-trip').addEventListener('click', ()=>openEditTripModal('new'));
+document.getElementById('btn-new-trip-empty').addEventListener('click', ()=>openEditTripModal('new'));
+document.getElementById('btn-edit-trip').addEventListener('click', ()=>openEditTripModal('edit'));
+document.getElementById('btn-copy-trip').addEventListener('click', ()=>openEditTripModal('copy'));
 document.getElementById('et-cancel').addEventListener('click', ()=>document.getElementById('edit-trip-modal').classList.add('hidden'));
 document.getElementById('edit-trip-modal').addEventListener('click', e=>{
   if(e.target.id === 'edit-trip-modal') document.getElementById('edit-trip-modal').classList.add('hidden');
@@ -927,13 +1168,13 @@ async function saveTripDetails(){
   const preferences = {
     freeText: document.getElementById('et-prefs-freetext').value.trim(),
     numPeople: numVal(document.getElementById('et-num-people').value),
-    baseOfOperations: document.getElementById('et-base-ops').value.trim(),
     budget: {
       max: numVal(document.getElementById('et-budget-max').value),
       realistic: numVal(document.getElementById('et-budget-realistic').value),
       perDay: numVal(document.getElementById('et-budget-perday').value)
     },
     maxStepsPerDay: numVal(document.getElementById('et-max-steps').value),
+    stopsPerRoute: numVal(document.getElementById('et-stops-per-route').value),
     travelMethods: etTravelMethodsPicker.get(),
     wantToSee: document.getElementById('et-want-to-see').value.split('\n').map(s=>s.trim()).filter(Boolean),
     placesToAvoid: document.getElementById('et-places-avoid').value.split('\n').map(s=>s.trim()).filter(Boolean),
@@ -941,28 +1182,101 @@ async function saveTripDetails(){
     catAvoid: catAvoidPicker.get()
   };
 
+  let places;
+  if(tripModalMode === 'copy'){
+    // Places to copy: whatever's checked, as-is — including a cat:["base"] one if selected. The
+    // base-of-operations block below still runs on top of this, so the base field stays
+    // authoritative (e.g. changing the address here updates/adds it even if left checked/unchecked
+    // in the list below; clearing the field removes it regardless of the checklist).
+    const checkedIdx = Array.from(document.querySelectorAll('.et-copy-place-check:checked')).map(cb=>Number(cb.dataset.idx));
+    places = checkedIdx.map(i => JSON.parse(JSON.stringify(tripData.places[i])));
+  }else{
+    places = (tripModalMode === 'new' ? [] : (tripData.places || [])).slice();
+  }
+  {
+    // Base of operations lives in places[] as a special cat:["base"] entry, not a preferences
+    // field. Only name/coords/coordsSource are this picker's business — everything else (links,
+    // hours, price, wishlist...) is preserved if the place already exists, since it's editable
+    // afterward like any other place and a Trip Details save shouldn't clobber those.
+    const existingBaseIdx = places.findIndex(p => (p.cat||[]).includes('base'));
+    if(etBaseSelection){
+      const existing = existingBaseIdx>=0 ? places[existingBaseIdx] : null;
+      const baseObj = {
+        ...(existing || {
+          city: '', area: '', wantRating: null,
+          price: { amount:null, currency:null, note:'' },
+          hours: { open:null, close:null, note:'' },
+          certainty: 'green', note: '', wishlist: [], links: [],
+          source: { ai:false, user:true }
+        }),
+        id: existing ? existing.id : 'base-of-operations',
+        name: etBaseSelection.address, // default to the resolved address; editable afterward like
+                                        // any other place (e.g. rename to the actual hotel name)
+        cat: ['base'],
+        coords: { lat: etBaseSelection.lat, lng: etBaseSelection.lng },
+        coordsSource: 'osm'
+      };
+      if(existingBaseIdx>=0) places[existingBaseIdx] = baseObj;
+      else places.push(baseObj);
+    }else if(existingBaseIdx>=0){
+      places.splice(existingBaseIdx, 1);
+    }
+  }
+
   const meta = {
-    ...tripData.meta,
+    ...(tripModalMode === 'edit' ? tripData.meta : {}),
     name, startDate, endDate, cities, defaultCurrency,
     summary: document.getElementById('et-summary').value.trim(),
     preferences
   };
 
+  if(tripModalMode !== 'edit'){
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '-' + Date.now().toString(36);
+    await db.collection('trips').doc(slug).set({
+      name, startDate, endDate, cities: citiesIndex,
+      ownerEmail: currentUser.email,
+      participants: [currentUser.email],
+      updatedAt: Date.now()
+    });
+    await db.collection('tripData').doc(slug).set({ meta, places, routes: [], days: [], events: [], budget: [] });
+    await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
+    document.getElementById('edit-trip-modal').classList.add('hidden');
+    loadTrip(slug);
+    return;
+  }
+
   await db.collection('trips').doc(currentTripId).update({
     name, startDate, endDate, cities: citiesIndex, updatedAt: Date.now()
   });
-  await db.collection('tripData').doc(currentTripId).update({ meta });
+  await db.collection('tripData').doc(currentTripId).update({ meta, places });
 
   tripData.meta = meta;
+  tripData.places = places;
   document.getElementById('trip-title').textContent = meta.name;
   document.getElementById('tv-name').textContent = meta.name;
   document.getElementById('tv-dates').textContent = formatDateRange(meta.startDate, meta.endDate);
   document.getElementById('tv-cities').innerHTML = cities.map(c=>`<span class="tag">${c.name}${c.country ? ', '+c.country : ''}</span>`).join('');
   document.getElementById('tv-summary').textContent = meta.summary || 'No summary yet.';
+  renderPlaces();
+  await syncDaysToTripDates();
 
   document.getElementById('edit-trip-modal').classList.add('hidden');
 }
 document.getElementById('et-save').addEventListener('click', saveTripDetails);
+
+// ---------- Delete trip ----------
+// The trips onSnapshot listener in loadTripIndex() already reacts to currentTripId no longer
+// existing (loads another trip if any remain, shows the empty state otherwise) — no extra
+// wiring needed here beyond the deletes themselves.
+async function deleteTrip(){
+  if(!currentTripId) return;
+  if(!confirm(`Delete "${tripData?.meta?.name || currentTripId}" permanently? This cannot be undone.`)) return;
+  const idToDelete = currentTripId;
+  await db.collection('trips').doc(idToDelete).delete();
+  await db.collection('tripData').doc(idToDelete).delete();
+  await db.collection('tripNotes').doc(idToDelete).delete();
+}
+document.getElementById('btn-delete-trip').addEventListener('click', deleteTrip);
 
 // ---------- Tabs ----------
 document.getElementById('tabs').addEventListener('click', e=>{
@@ -971,6 +1285,106 @@ document.getElementById('tabs').addEventListener('click', e=>{
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   e.target.classList.add('active');
   document.getElementById('p-'+e.target.dataset.tab).classList.add('active');
+  if(e.target.dataset.tab === 'places') setTimeout(renderMap, 0);
+  if(e.target.dataset.tab === 'routes') renderRoutes();
+  if(e.target.dataset.tab === 'days') renderDays();
+});
+
+// ---------- Map ----------
+let leafletMap = null;
+let leafletMarkers = [];
+let leafletMarkersByIdx = {};
+
+function renderMap(){
+  const allPlaces = tripData?.places || [];
+  const withCoords = allPlaces.map((p,i)=>({p,i})).filter(({p})=>p.coords);
+  document.getElementById('map-empty').classList.toggle('hidden', withCoords.length > 0);
+
+  if(!leafletMap){
+    leafletMap = L.map('map-container');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(leafletMap);
+  }
+  leafletMap.invalidateSize();
+
+  leafletMarkers.forEach(m => leafletMap.removeLayer(m));
+  leafletMarkers = [];
+  leafletMarkersByIdx = {};
+
+  if(!withCoords.length){
+    if(!coordsFixerActive) leafletMap.setView([20, 0], 2);
+    return;
+  }
+
+  const bounds = [];
+  withCoords.forEach(({p, i})=>{
+    const marker = L.marker([p.coords.lat, p.coords.lng]).addTo(leafletMap);
+    const metaLine = [p.city, p.area].filter(Boolean).join(', ');
+    marker.bindPopup(`<b>${p.name}</b>${metaLine ? `<br>${metaLine}` : ''}${p.wantRating ? `<br>Want: ${p.wantRating}/10` : ''}`);
+    marker.on('click', () => focusListOnPlace(i));
+    leafletMarkers.push(marker);
+    leafletMarkersByIdx[i] = marker;
+    bounds.push([p.coords.lat, p.coords.lng]);
+  });
+
+  // While the live coordinate fixer is running, it controls the view (showCoordsCompareOnMap) —
+  // don't yank the viewport back to fit-all every time renderPlaces()/renderMap() runs.
+  if(!coordsFixerActive){
+    if(bounds.length === 1) leafletMap.setView(bounds[0], 14);
+    else leafletMap.fitBounds(bounds, { padding: [30, 30] });
+  }
+}
+
+function isPlaceHiddenByFilters(place){
+  if(placesCatFilter === UNCATEGORIZED) return (place.cat||[]).length > 0;
+  if(placesCatFilter && !(place.cat||[]).includes(placesCatFilter)) return true;
+  if(placesSourceFilter && !place.source?.[placesSourceFilter]) return true;
+  if(!placeMatchesSearch(place)) return true;
+  return false;
+}
+
+function focusMapOnPlace(idx){
+  const marker = leafletMarkersByIdx[idx];
+  if(!marker) return;
+  document.getElementById('places-split').classList.remove('mode-list');
+  setTimeout(()=>{
+    leafletMap.invalidateSize();
+    leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 14));
+    marker.openPopup();
+  }, 50);
+}
+
+function focusListOnPlace(idx){
+  document.getElementById('places-split').classList.remove('mode-map');
+  const place = tripData.places[idx];
+  if(place && isPlaceHiddenByFilters(place)){
+    placesCatFilter = null;
+    placesSourceFilter = null;
+    placesSearchQuery = '';
+    document.getElementById('places-search').value = '';
+    renderPlaces();
+  }
+  setTimeout(()=>{
+    const row = document.querySelector(`.place-row[data-idx="${idx}"]`);
+    if(!row) return;
+    row.scrollIntoView({behavior:'smooth', block:'center'});
+    document.querySelectorAll('.place-row.highlighted').forEach(r=>r.classList.remove('highlighted'));
+    row.classList.add('highlighted');
+    setTimeout(()=>row.classList.remove('highlighted'), 2500);
+  }, 60);
+}
+
+document.querySelectorAll('.pane-maximize-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const mode = btn.dataset.mode;
+    const split = document.getElementById('places-split');
+    const alreadyActive = split.classList.contains('mode-'+mode);
+    split.classList.remove('mode-list', 'mode-map');
+    if(!alreadyActive) split.classList.add('mode-'+mode);
+    if(!split.classList.contains('mode-list')) setTimeout(()=>leafletMap && leafletMap.invalidateSize(), 50);
+  });
 });
 
 // ---------- Places ----------
@@ -1001,6 +1415,11 @@ function formatHours(hours){
   if(hours.note) parts.push(hours.note);
   return parts.join(' · ');
 }
+
+// The thumbnail lives in links[] as a label:"Thumbnail" entry rather than a separate field —
+// same list the user already edits in the place modal, no dedicated UI needed to change it.
+function isThumbnailLabel(label){ return (label||'').trim().toLowerCase() === 'thumbnail'; }
+function thumbnailLinkOf(place){ return (place.links||[]).find(l=>isThumbnailLabel(l.label)); }
 
 async function updatePriceConversions(ordered){
   const defaultCur = tripData?.meta?.defaultCurrency;
@@ -1036,6 +1455,23 @@ document.getElementById('cat-filter').addEventListener('click', e=>{
   renderPlaces();
 });
 
+let placesSearchQuery = '';
+
+// Space-separated keywords, all must match (AND), case-insensitive, against the whole place
+// object — simplest way to search "everything" without hand-picking which fields count.
+// Reused by the route editor's add-place search too — same "match everything" approach.
+function placeMatchesKeywords(place, query){
+  const keywords = (query||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if(!keywords.length) return true;
+  const haystack = JSON.stringify(place).toLowerCase();
+  return keywords.every(k=>haystack.includes(k));
+}
+function placeMatchesSearch(place){ return placeMatchesKeywords(place, placesSearchQuery); }
+document.getElementById('places-search').addEventListener('input', e=>{
+  placesSearchQuery = e.target.value;
+  renderPlaces();
+});
+
 let placesSourceFilter = null; // null | 'ai' | 'user'
 
 function renderSourceFilter(){
@@ -1067,6 +1503,7 @@ function sourceIcons(source){
 function renderPlaces(){
   renderCatFilter();
   renderSourceFilter();
+  updateCoordsPendingBadge();
   const el = document.getElementById('places-list');
   const all = tripData?.places || [];
   let withIdx = all.map((p, i)=>({p, i}));
@@ -1078,9 +1515,15 @@ function renderPlaces(){
   if(placesSourceFilter){
     withIdx = withIdx.filter(({p})=>p.source?.[placesSourceFilter]);
   }
+  if(placesSearchQuery.trim()){
+    withIdx = withIdx.filter(({p})=>placeMatchesSearch(p));
+  }
   const filtered = withIdx;
+  const anyFilterActive = placesCatFilter || placesSourceFilter || placesSearchQuery.trim();
+  document.getElementById('places-count').textContent = anyFilterActive
+    ? `(${filtered.length} of ${all.length})` : `(${all.length})`;
   if(!filtered.length){
-    el.innerHTML = (placesCatFilter || placesSourceFilter) ? '<p class="mono">No places match this filter.</p>' : '<p class="mono">No places added yet.</p>';
+    el.innerHTML = anyFilterActive ? '<p class="mono">No places match this filter.</p>' : '<p class="mono">No places added yet.</p>';
     return;
   }
 
@@ -1089,44 +1532,118 @@ function renderPlaces(){
     const id = p.id || slugify(p.name);
     const note = tripNotes.places[id] || { note:'' };
     const catTags = (p.cat||[]).map(c=>`<span class="tag">${formatCat(c)}</span>`).join('');
-    const links = (p.links||[]).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
+    const thumbUrl = thumbnailLinkOf(p)?.url;
+    const links = (p.links||[]).filter(l=>!isThumbnailLabel(l.label)).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
     const coordsTag = p.coords ? `<span class="coords-tag">${p.coords.lat.toFixed(4)}, ${p.coords.lng.toFixed(4)} (${p.coordsSource||'user'})</span>` : '';
     const wantClass = (p.wantRating||0) > 7 ? 'want-rating main' : 'want-rating';
     const priceBase = formatPriceBase(p.price);
     const priceDisplay = priceBase ? `${priceBase}<span class="price-convert" data-idx="${i}"></span>` : '';
     const hoursBase = formatHours(p.hours);
 
+    const thumb = thumbUrl ? `<img class="place-thumb" src="${thumbUrl}" alt="">`
+      : (p.photoChecked ? `<div class="place-thumb place-thumb-empty" data-idx="${i}" title="Add a photo">+</div>` : '<div class="place-thumb place-thumb-loading"></div>');
+
     return `<div class="place-row" data-idx="${i}">
-      <div class="place-name">${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)} ${sourceIcons(p.source)}</div>
-      <div class="place-meta">${[p.city, p.area, priceDisplay, hoursBase].filter(Boolean).join(' · ')}</div>
-      ${catTags ? `<div style="margin-top:6px;">${catTags}</div>` : ''}
-      ${p.note ? `<div class="place-meta">${p.note}</div>` : ''}
-      ${(p.wishlist||[]).length ? `<div class="place-meta">Wishlist: ${p.wishlist.join(', ')}</div>` : ''}
-      <div style="margin-top:6px;">
-        <a class="place-link" href="${mapLink(p.name+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${coordsTag}
-      </div>
-      <div class="place-actions">
-        <button class="js-edit-place" data-idx="${i}">Edit</button>
-        <button class="js-delete-place" data-idx="${i}">Delete</button>
-      </div>
-      <div class="edit-row" data-placeid="${id}">
-        <textarea class="js-place-note" placeholder="Plan note (reservation reminders, preferences...)">${(note.note||'').replace(/</g,'&lt;')}</textarea>
+      <div style="display:flex; gap:12px;">
+        ${thumb}
+        <div style="flex:1; min-width:0;">
+          <div class="place-name">${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)} ${sourceIcons(p.source)}</div>
+          <div class="place-meta">${[p.city, p.area, priceDisplay, hoursBase].filter(Boolean).join(' · ')}</div>
+          ${catTags ? `<div style="margin-top:6px;">${catTags}</div>` : ''}
+          ${p.note ? `<div class="place-meta">${p.note}</div>` : ''}
+          ${(p.wishlist||[]).length ? `<div class="place-meta">Wishlist: ${p.wishlist.join(', ')}</div>` : ''}
+          <div style="margin-top:6px;">
+            <a class="place-link" href="${mapLink(p.name+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${coordsTag}
+          </div>
+          <div class="place-actions">
+            <button class="js-edit-place" data-idx="${i}">Edit</button>
+            <button class="js-check-place-coords" data-idx="${i}">📍 Check coordinates</button>
+            <button class="js-delete-place" data-idx="${i}">Delete</button>
+          </div>
+          <div class="edit-row" data-placeid="${id}">
+            <textarea class="js-place-note" placeholder="Plan note (reservation reminders, preferences...)">${(note.note||'').replace(/</g,'&lt;')}</textarea>
+          </div>
+        </div>
       </div>
     </div>`;
   }).join('');
 
   updatePriceConversions(ordered);
+  renderMap();
+  fetchMissingPhotos();
 }
 
 document.getElementById('places-list').addEventListener('click', e=>{
-  if(e.target.classList.contains('js-edit-place')) openPlaceModal(Number(e.target.dataset.idx));
-  if(e.target.classList.contains('js-delete-place')) deletePlace(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('place-thumb-empty')) return openPlaceModal(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('place-thumb')) return openPhotoLightbox(e.target.src);
+  if(e.target.classList.contains('js-edit-place')) return openPlaceModal(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-check-place-coords')) return startCoordsFixer([tripData.places[Number(e.target.dataset.idx)]]);
+  if(e.target.classList.contains('js-delete-place')) return deletePlace(Number(e.target.dataset.idx));
+  if(e.target.closest('a, button, textarea')) return; // don't hijack clicks on links/controls
+  const row = e.target.closest('.place-row');
+  if(row) focusMapOnPlace(Number(row.dataset.idx));
 });
 document.getElementById('places-list').addEventListener('input', e=>{
   if(e.target.classList.contains('js-place-note')){
     const placeId = e.target.closest('.edit-row').dataset.placeid;
     db.collection('tripNotes').doc(currentTripId).set({places:{[placeId]:{note:e.target.value}}}, {merge:true});
   }
+});
+
+// ---------- Place photos (Wikipedia — free, no key, CORS via origin=*) ----------
+// Name-based search only (no geosearch): geosearch can return a merely-nearby article rather
+// than one about the place itself (e.g. an event page happened to be geographically closest),
+// which would show a misleading photo. A direct name+city search is far more reliable.
+async function fetchPlacePhotoUrl(place){
+  const q = [place.name, place.city].filter(Boolean).join(' ');
+  if(!q) return null;
+  try{
+    const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=1&prop=pageimages&pithumbsize=500&format=json&origin=*`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const pages = data.query?.pages;
+    if(!pages) return null;
+    const page = Object.values(pages)[0];
+    return page?.thumbnail?.source || null;
+  }catch(err){
+    console.warn('Photo lookup failed for', place.name, err);
+    return null;
+  }
+}
+
+let fetchingPhotos = false;
+async function fetchMissingPhotos(){
+  if(fetchingPhotos) return;
+  const places = tripData?.places || [];
+  const pending = places.map((p,i)=>({p,i})).filter(({p})=>!p.photoChecked);
+  if(!pending.length) return;
+  fetchingPhotos = true;
+  const results = await Promise.allSettled(pending.map(({p})=>fetchPlacePhotoUrl(p)));
+  const updated = places.slice();
+  pending.forEach(({i}, idx)=>{
+    const r = results[idx];
+    const found = (r.status === 'fulfilled') ? r.value : null;
+    const place = { ...updated[i], photoChecked: true };
+    // Never overwrite a link the user already has (manual or from an earlier lookup).
+    if(found && !thumbnailLinkOf(place)){
+      place.links = [...(place.links||[]), { label: 'Thumbnail', url: found }];
+    }
+    updated[i] = place;
+  });
+  tripData.places = updated;
+  fetchingPhotos = false;
+  if(currentTripId){
+    await db.collection('tripData').doc(currentTripId).update({ places: updated });
+    renderPlaces();
+  }
+}
+
+function openPhotoLightbox(src){
+  document.getElementById('photo-lightbox-img').src = src;
+  document.getElementById('photo-lightbox').classList.remove('hidden');
+}
+document.getElementById('photo-lightbox').addEventListener('click', ()=>{
+  document.getElementById('photo-lightbox').classList.add('hidden');
 });
 
 // ---------- Place modal ----------
@@ -1142,6 +1659,9 @@ function addLinkRow(label, url){
   document.getElementById('pl-links-list').appendChild(row);
 }
 document.getElementById('pl-add-link').addEventListener('click', ()=>addLinkRow());
+document.querySelectorAll('.pl-add-link-preset').forEach(btn=>{
+  btn.addEventListener('click', ()=>addLinkRow(btn.dataset.label, ''));
+});
 
 // ---------- Category chips ----------
 let currentCats = [];
@@ -1316,7 +1836,10 @@ async function savePlace(){
     source: {
       ai: editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].source?.ai : false,
       user: true
-    }
+    },
+    // A manually-added Thumbnail link means there's nothing left to auto-look-up; otherwise
+    // preserve whatever the Wikipedia lookup already determined (found or not).
+    photoChecked: links.some(l=>isThumbnailLabel(l.label)) || (editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].photoChecked : false)
   };
   if(lat !== '' && lng !== ''){
     place.coords = { lat: Number(lat), lng: Number(lng) };
@@ -1364,7 +1887,7 @@ function openAiModal(){
   // Prefill from trip details — editable here for just this batch, doesn't write back.
   const prefs = tripData?.meta?.preferences || emptyPreferences();
   document.getElementById('ai-num-people').value = prefs.numPeople ?? '';
-  document.getElementById('ai-base-ops').value = prefs.baseOfOperations || '';
+  document.getElementById('ai-base-ops').value = findBasePlace()?.name || '';
   document.getElementById('ai-budget-max').value = prefs.budget?.max ?? '';
   document.getElementById('ai-budget-realistic').value = prefs.budget?.realistic ?? '';
   document.getElementById('ai-budget-perday').value = prefs.budget?.perDay ?? '';
@@ -1449,7 +1972,7 @@ function buildAiInstruction(){
   if(prefs.travelMethods.length) lines.push(`Getting around by: ${prefs.travelMethods.join(', ')}.`);
   if(prefs.catWant.length) lines.push(`Especially interested in: ${prefs.catWant.join(', ')}.`);
   if(prefs.catAvoid.length) lines.push(`Not interested in: ${prefs.catAvoid.join(', ')}.`);
-  if(prefs.wantToSee.length) lines.push(`Already knows they want (include only if genuinely relevant, don't just repeat these back): ${prefs.wantToSee.join(', ')}.`);
+  if(prefs.wantToSee.length) lines.push(`Include a full JSON entry for each of these specific places the user already wants (unless one is already in the "already on the list" names below) — do not skip or omit them just because the user already knows about them: ${prefs.wantToSee.join(', ')}.`);
   if(prefs.placesToAvoid.length) lines.push(`Avoid suggesting: ${prefs.placesToAvoid.join(', ')}.`);
   if(prefs.freeText) lines.push(`Other preferences: ${prefs.freeText}`);
   lines.push(`Generate roughly ${count} places for this batch.`);
@@ -1577,7 +2100,1491 @@ document.getElementById('ai-import').addEventListener('click', async ()=>{
   tripData.places = places;
   renderPlaces();
   closeAiModal();
+  startCoordsFixer(); // newly-imported places need checking — jump straight into review
 });
+
+// ---------- AI route generation (Tier 2, mirrors AI place generation above) ----------
+// Places without coords can't be geographically clustered, and the base-of-operations place
+// is an implicit start/end (see below), not something the AI should list as a stop to visit.
+function getEligiblePlacesForRoutes(city){
+  return (tripData?.places||[]).filter(p => p.city === city && p.coords && !(p.cat||[]).includes('base'));
+}
+
+// Presets offered in the route editor's travel-type picker (plus a free-text "Custom…" option) —
+// reused here so the AI is nudged toward the same vocabulary the manual editor uses.
+const TRAVEL_LEG_TYPES = ['walk','metro','bus','train','taxi','ferry','car','bike'];
+
+function routesTravelSchemaDoc(base){
+  const cur = tripData?.meta?.defaultCurrency;
+  const baseNote = base?.coords
+    ? ` The FIRST and LAST objects in "stops" MUST have "placeId": "${base.id}" (the base of operations, ${base.name}) — it is a real entry in the place list below and belongs in "stops" like any other, not omitted.`
+    : '';
+  return `Each item in the array must match this exact shape:
+{
+  "label": string (required — a short descriptive name for this route, e.g. "Old Town Highlights"),
+  "stops": array of objects, in visiting order — each:
+    {
+      "placeId": string (required — must exactly match one of the "id" values from the place list below; do not invent new ids or use place names here),
+      "stayDuration": number of minutes or null — your best approximate guess at how long a visit here takes (e.g. a museum might be 90-120, a quick photo stop might be 15),
+      "travel": array of { "type": one of ${TRAVEL_LEG_TYPES.map(t=>`"${t}"`).join('/')} (or another short single word if truly none fit), "distance": number of meters or null, "time": number of minutes or null, "cost": number${cur ? ` in ${cur} (the trip's currency)` : ' (a plain number, no currency set for this trip)'} or null — use null for "free"/unknown rather than 0, "details": string e.g. line number/platform } describing how to get from this stop to the NEXT one — numbers only, no units in the string (e.g. distance: 600, not "600m"). Omit or use an empty array for the last stop
+    }
+}${baseNote}`;
+}
+
+const routesTravelMethodsPicker = makeChipPicker('routes-travel-methods', TRAVEL_METHODS, formatCat);
+
+function updateRoutesEligibleHint(){
+  const city = document.getElementById('routes-city').value;
+  const all = (tripData?.places||[]).filter(p => p.city === city && !(p.cat||[]).includes('base'));
+  const eligible = getEligiblePlacesForRoutes(city);
+  const missing = all.length - eligible.length;
+  const el = document.getElementById('routes-eligible-hint');
+  if(!city){ el.textContent = ''; return; }
+  el.textContent = missing > 0
+    ? `${eligible.length} place(s) in ${city} have coordinates and will be used; ${missing} more don't have coordinates yet and will be skipped — check coordinates first for best results.`
+    : `${eligible.length} place(s) in ${city} will be used.`;
+}
+
+function openRoutesModal(){
+  document.getElementById('routes-step-setup').classList.remove('hidden');
+  document.getElementById('routes-step-instructions').classList.add('hidden');
+  document.getElementById('routes-step-preview').classList.add('hidden');
+  document.getElementById('routes-error').textContent = '';
+  document.getElementById('routes-response').value = '';
+  document.getElementById('routes-count').value = 3;
+  document.getElementById('routes-notes').value = '';
+
+  const citySel = document.getElementById('routes-city');
+  const cities = tripData?.meta?.cities || [];
+  citySel.innerHTML = cities.length
+    ? cities.map(c=>`<option value="${c.name}">${c.name}${c.country ? ', '+c.country : ''}</option>`).join('')
+    : '<option value="">(none — add a city first)</option>';
+  document.getElementById('routes-no-cities-hint').classList.toggle('hidden', cities.length > 0);
+
+  const prefs = tripData?.meta?.preferences || emptyPreferences();
+  document.getElementById('routes-max-steps').value = prefs.maxStepsPerDay ?? '';
+  document.getElementById('routes-stops-per-route').value = prefs.stopsPerRoute ?? '';
+  routesTravelMethodsPicker.set(prefs.travelMethods);
+
+  updateRoutesEligibleHint();
+  document.getElementById('routes-modal').classList.remove('hidden');
+}
+document.getElementById('routes-city').addEventListener('change', updateRoutesEligibleHint);
+document.getElementById('routes-open-edit-trip').addEventListener('click', ()=>{
+  closeRoutesModal();
+  openEditTripModal('edit');
+});
+function closeRoutesModal(){ document.getElementById('routes-modal').classList.add('hidden'); }
+document.getElementById('btn-generate-routes').addEventListener('click', openRoutesModal);
+['routes-cancel-1','routes-cancel-2','routes-cancel-3'].forEach(id=>document.getElementById(id).addEventListener('click', closeRoutesModal));
+document.getElementById('routes-modal').addEventListener('click', e=>{
+  if(e.target.id === 'routes-modal') closeRoutesModal();
+});
+
+function buildRoutesInstruction(){
+  const city = document.getElementById('routes-city').value;
+  const count = document.getElementById('routes-count').value || '3';
+  const notes = document.getElementById('routes-notes').value.trim();
+  const maxSteps = document.getElementById('routes-max-steps').value;
+  const stopsPerRoute = document.getElementById('routes-stops-per-route').value;
+  const travelMethods = routesTravelMethodsPicker.get();
+  const eligible = getEligiblePlacesForRoutes(city);
+  const base = findBasePlace();
+
+  const lines = [];
+  lines.push(`I'm planning walking/transit routes for ${city || 'my trip'} that thread together specific places I've already saved, grouped so each route is geographically coherent (don't zigzag across the city) and prioritizes higher-rated places.`);
+  // Earlier wording told the AI to treat the base as implicit and leave it OUT of "stops" — that
+  // was the wrong call: it needs to be a literal, explicit member of "stops" (first and last) for
+  // this to actually show up in the output reliably. Stated once up front, restated right before
+  // the schema, and reinforced by the base being a real entry in the embedded place list below —
+  // repetition is a real, if imperfect, lever against LLMs quietly dropping a single buried
+  // instruction.
+  if(base?.coords) lines.push(`IMPORTANT: every route MUST explicitly include the base of operations, "${base.name}" (id "${base.id}"), as the FIRST and LAST entry in "stops" — not implied, not omitted, an actual stop like any other with that exact placeId.`);
+  if(maxSteps) lines.push(`Prefers no more than about ${maxSteps} steps/day — weight route length accordingly.`);
+  if(stopsPerRoute) lines.push(`Aim for about ${stopsPerRoute} stops per route, not counting the base of operations (which is separately required as the first/last stop above).`);
+  if(travelMethods.length) lines.push(`Getting around by: ${travelMethods.join(', ')}.`);
+  if(notes) lines.push(`Notes specific to this batch only: ${notes}`);
+  lines.push(`Generate roughly ${count} candidate routes. Each route should thread together higher-rated places (wantRating above 7 is near-essential) with a couple of lower-rated "mini" stops along the way where geographically sensible. A place can appear in more than one candidate route.`);
+  if(base?.coords) lines.push(`Reminder: "stops"[0] and "stops"[stops.length-1] must both have "placeId": "${base.id}".`);
+  lines.push('');
+  lines.push('Places available for this city (use "id" values exactly as given for "placeId" — do not invent new ids):');
+  const placesForPrompt = base?.coords ? eligible.concat([base]) : eligible;
+  lines.push(JSON.stringify(placesForPrompt.map(p=>({ id: p.id, name: p.name, wantRating: p.wantRating, cat: p.cat, coords: p.coords })), null, 2));
+  lines.push('');
+  lines.push(routesTravelSchemaDoc(base));
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+document.getElementById('routes-build').addEventListener('click', ()=>{
+  document.getElementById('routes-instructions').value = buildRoutesInstruction();
+  document.getElementById('routes-step-instructions').classList.remove('hidden');
+});
+
+document.getElementById('routes-copy').addEventListener('click', async ()=>{
+  const btn = document.getElementById('routes-copy');
+  try{
+    await navigator.clipboard.writeText(document.getElementById('routes-instructions').value);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }catch(err){
+    alert('Could not copy automatically — select the text and copy manually.');
+  }
+});
+
+function validateRoutesResponse(){
+  const errEl = document.getElementById('routes-error');
+  errEl.textContent = '';
+  const city = document.getElementById('routes-city').value;
+  const eligible = getEligiblePlacesForRoutes(city);
+  const base = findBasePlace();
+  // The base is a valid placeId reference too now that the instruction requires the AI to
+  // literally include it as the first/last stop, even though getEligiblePlacesForRoutes()
+  // deliberately excludes it from the "regular" eligible list (used for the count hint etc.).
+  const eligibleAll = base?.coords ? eligible.concat([base]) : eligible;
+  const eligibleIds = new Set(eligibleAll.map(p=>p.id));
+  const eligibleById = new Map(eligibleAll.map(p=>[p.id, p]));
+
+  let parsed;
+  try{
+    parsed = JSON.parse(document.getElementById('routes-response').value);
+  }catch(err){
+    errEl.textContent = 'Could not parse as JSON: ' + err.message;
+    return null;
+  }
+  if(!Array.isArray(parsed)){
+    errEl.textContent = 'Expected a JSON array of route objects at the top level.';
+    return null;
+  }
+
+  const errors = [];
+  const routes = [];
+  parsed.forEach((item, i)=>{
+    if(typeof item !== 'object' || item === null || Array.isArray(item)){
+      errors.push(`Item ${i+1}: not an object.`);
+      return;
+    }
+    const label = (item.label||'').toString().trim();
+    if(!label){ errors.push(`Item ${i+1}: missing "label".`); return; }
+    if(!Array.isArray(item.stops) || !item.stops.length){
+      errors.push(`Item ${i+1} ("${label}"): missing or empty "stops" array.`);
+      return;
+    }
+    const stops = [];
+    let stopError = null;
+    item.stops.forEach((s, si)=>{
+      if(stopError) return;
+      const placeId = s && typeof s.placeId === 'string' ? s.placeId : null;
+      if(!placeId || !eligibleIds.has(placeId)){
+        stopError = `Item ${i+1} ("${label}"), stop ${si+1}: unknown placeId "${placeId}".`;
+        return;
+      }
+      // Lenient toward an AI that ignores the "numbers only" instruction and sends "600" as a
+      // string anyway — coerce if parseable, fall back to null (not 0) rather than reject the
+      // whole route over a units mistake.
+      const toNumOrNull = v => { const n = Number(v); return (typeof v === 'number' || typeof v === 'string') && v !== '' && !Number.isNaN(n) ? n : null; };
+      const travel = Array.isArray(s.travel) ? s.travel.filter(t=>t && typeof t === 'object').map(t=>({
+        type: typeof t.type === 'string' ? t.type : '',
+        distance: toNumOrNull(t.distance),
+        time: toNumOrNull(t.time),
+        cost: toNumOrNull(t.cost),
+        details: typeof t.details === 'string' ? t.details : ''
+      })) : [];
+      stops.push({ type: 'place', placeId, note: '', stayDuration: toNumOrNull(s.stayDuration), travel });
+    });
+    if(stopError){ errors.push(stopError); return; }
+    const totalWantRating = stops.reduce((sum, s)=>sum + (eligibleById.get(s.placeId)?.wantRating || 0), 0);
+    routes.push({
+      id: slugify(label) + '-' + Date.now().toString(36) + '-' + i,
+      city, label, stops, totalWantRating, generatedBy: 'ai', edited: false
+    });
+  });
+  if(errors.length){
+    errEl.textContent = `Found ${errors.length} problem(s):\n` + errors.join('\n');
+    return null;
+  }
+  if(!routes.length){
+    errEl.textContent = 'No routes found in the response.';
+    return null;
+  }
+  return routes;
+}
+
+let routesPreviewList = [];
+document.getElementById('routes-validate').addEventListener('click', ()=>{
+  const routes = validateRoutesResponse();
+  if(!routes) return;
+  routesPreviewList = routes;
+  renderRoutesPreview();
+  document.getElementById('routes-step-preview').classList.remove('hidden');
+});
+
+function renderRoutesPreview(){
+  const el = document.getElementById('routes-preview-list');
+  el.innerHTML = routesPreviewList.map((r, i)=>{
+    const stopNames = r.stops.map(s=>{
+      const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+      return p ? p.name : s.placeId;
+    }).join(' → ');
+    return `<label class="ai-preview-row">
+      <input type="checkbox" class="routes-preview-check" data-idx="${i}" checked>
+      <div>
+        <div class="place-name">${r.label}</div>
+        <div class="place-meta">${stopNames}</div>
+        <div class="place-meta">Total want rating: ${r.totalWantRating}</div>
+      </div>
+    </label>`;
+  }).join('');
+}
+
+document.getElementById('routes-import').addEventListener('click', async ()=>{
+  const checked = Array.from(document.querySelectorAll('.routes-preview-check:checked')).map(cb=>Number(cb.dataset.idx));
+  if(!checked.length){ closeRoutesModal(); return; }
+  const toAdd = checked.map(i=>routesPreviewList[i]);
+  const routes = (tripData.routes || []).concat(toAdd);
+  await db.collection('tripData').doc(currentTripId).update({ routes });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.routes = routes;
+  renderRoutes();
+  closeRoutesModal();
+});
+
+// A stop's type wasn't recorded before this pass (AI-generated routes from the first version of
+// this feature only ever had {placeId, travel}) — infer it defensively rather than migrating data.
+function stopType(s){ return s.type || (s.placeId ? 'place' : 'break'); }
+
+// Distance/time/cost are numbers as of this pass (meters/minutes/trip currency) — but routes saved
+// before this change have free-text strings ("600m", "8 min") in these fields. Show those as-is
+// rather than trying to parse and reformat free text, which risks silently misreading old data.
+function formatLegDistance(d){
+  if(d == null || d === '') return '';
+  if(typeof d !== 'number') return String(d);
+  return d > 500 ? `${(d/1000).toFixed(1)} km` : `${d} m`;
+}
+function formatLegTime(t){
+  if(t == null || t === '') return '';
+  if(typeof t !== 'number') return String(t);
+  return `${t} min`;
+}
+function formatLegCost(c){
+  if(c == null || c === '') return '';
+  if(typeof c !== 'number') return String(c);
+  const cur = tripData?.meta?.defaultCurrency;
+  return cur ? `${c} ${cur}` : `${c}`;
+}
+function formatLeg(leg, includeDetails){
+  if(!leg) return '';
+  const parts = [leg.type ? formatCat(leg.type) : '', formatLegDistance(leg.distance), formatLegTime(leg.time), formatLegCost(leg.cost)];
+  if(includeDetails) parts.push(leg.details || '');
+  return parts.filter(Boolean).join(' · ');
+}
+// Used for stay durations, break durations, and route totals — all can run much longer than a
+// travel leg (a museum visit vs. an 8-minute walk), so this uses hours where a plain "150 min"
+// would be harder to read at a glance.
+function formatMinutes(m){
+  if(m == null || m === '') return '';
+  if(typeof m !== 'number') return String(m);
+  if(m >= 60){ const h = Math.floor(m/60), rem = m % 60; return rem ? `${h}h ${rem}m` : `${h}h`; }
+  return `${m} min`;
+}
+
+// Sums whatever numeric stay/break durations and travel times are actually entered — legs or
+// stops left blank just don't contribute, so this is a lower bound, not a guaranteed-complete
+// total, but it's the best available without a real routing API.
+function computeRouteTotalTime(r){
+  let total = 0, hasAny = false;
+  r.stops.forEach(s=>{
+    const type = stopType(s);
+    if(type === 'place' && typeof s.stayDuration === 'number'){ total += s.stayDuration; hasAny = true; }
+    else if(type === 'break' && typeof s.duration === 'number'){ total += s.duration; hasAny = true; }
+    const leg = s.travel && s.travel[0];
+    if(leg && typeof leg.time === 'number'){ total += leg.time; hasAny = true; }
+  });
+  return hasAny ? total : null;
+}
+
+// Newer routes (AI-generated or manual) include the base literally as the first/last stop; older
+// ones don't. Only show the "Start:"/"End:" bookend when the base ISN'T already a real stop, so
+// it's never shown twice.
+function isBaseStop(s, base){ return !!base && stopType(s) === 'place' && s.placeId === base.id; }
+
+function routeStopSequenceLine(r, base){
+  const firstIsBase = r.stops.length && isBaseStop(r.stops[0], base);
+  const lastIsBase = r.stops.length && isBaseStop(r.stops[r.stops.length-1], base);
+  const stopParts = r.stops.map((s,si)=>{
+    const leg = s.travel && s.travel[0];
+    const legStr = formatLeg(leg, false);
+    const legText = legStr ? ` <span class="place-meta">(${legStr})</span> →` : (si < r.stops.length-1 ? ' →' : '');
+    if(stopType(s) === 'break'){
+      const breakDurStr = formatMinutes(s.duration);
+      return `☕ Break${breakDurStr ? ` (${breakDurStr})` : ''}${s.note ? ` — ${s.note}` : ''}` + legText;
+    }
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    const name = p ? `<a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">${p.name}</a>` : (s.placeId || '(unknown place)');
+    const stayStr = formatMinutes(s.stayDuration);
+    const baseLabel = isBaseStop(s, base) ? (si===0 ? 'Start: ' : si===r.stops.length-1 ? 'End: ' : '') : '';
+    return baseLabel + name + (stayStr ? ` <span class="place-meta">(${stayStr})</span>` : '') + legText;
+  });
+  return [(base && !firstIsBase) ? `Start: ${base.name}` : null, ...stopParts, (base && !lastIsBase) ? `End: ${base.name}` : null].filter(Boolean).join(' ');
+}
+
+let expandedRouteIdx = null;
+let expandedRouteMap = null;
+let expandedRouteMarkersByStopIdx = {};
+
+function renderExpandedRouteHtml(r){
+  const base = findBasePlace();
+  const rows = r.stops.map((s,si)=>{
+    const leg = s.travel && s.travel[0];
+    const legStr = formatLeg(leg, true);
+    const legLine = legStr ? `<div class="place-meta" style="margin:4px 0 8px 14px;">↓ ${legStr}</div>` : '';
+    if(stopType(s) === 'break'){
+      const breakDurStr = formatMinutes(s.duration);
+      return `<div class="route-stop-row" data-stop-idx="${si}">
+        <div class="place-meta">${si+1}. ☕ Break${breakDurStr ? ` (${breakDurStr})` : ''}</div>
+        ${s.note ? `<div class="place-meta">${s.note}</div>` : ''}
+      </div>${legLine}`;
+    }
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    const clickable = p && p.coords;
+    // Categories + the place's own description surface here specifically (not just the compact
+    // card view) since unfamiliar names — Danish place names, e.g. — are hard to place from the
+    // name alone; this is the view where there's room to show it.
+    const catLine = p && (p.cat||[]).length ? `<div class="place-meta">${(p.cat||[]).map(formatCat).join(', ')}</div>` : '';
+    const descLine = p?.note ? `<div class="place-meta">${p.note}</div>` : '';
+    const stayStr = formatMinutes(s.stayDuration);
+    const baseTag = isBaseStop(s, base) ? ' <span class="tag">Base of operations</span>' : '';
+    return `<div class="route-stop-row${clickable ? ' js-route-stop-click' : ''}" data-stop-idx="${si}" style="${clickable ? 'cursor:pointer;' : ''}">
+      <div class="place-name" style="font-size:.95rem;">${si+1}. ${p ? p.name : (s.placeId || '(unknown place)')}${stayStr ? ` <span class="place-meta">(${stayStr})</span>` : ''}${baseTag}</div>
+      ${catLine}
+      ${descLine}
+      ${s.note ? `<div class="place-meta">Note for this stop: ${s.note}</div>` : ''}
+    </div>${legLine}`;
+  }).join('');
+  return `<div class="route-split">
+    <div class="route-split-pane">${rows || '<p class="mono">No stops yet.</p>'}</div>
+    <div class="route-split-pane">
+      <div class="route-map-container" id="route-map-${r.id}"></div>
+    </div>
+  </div>`;
+}
+
+function initExpandedRouteMap(route){
+  const container = document.getElementById(`route-map-${route.id}`);
+  if(!container) return;
+  const map = L.map(container).setView([20, 0], 2); // defined view before any markers are added
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(map);
+  expandedRouteMap = map;
+
+  const points = [];
+  const markersByStopIdx = {};
+  let markerNum = 0;
+  route.stops.forEach((s, si)=>{
+    if(stopType(s) !== 'place') return;
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    if(!p || !p.coords) return;
+    markerNum++;
+    const icon = L.divIcon({
+      className: 'route-num-marker',
+      html: `<div style="background:var(--harbor); color:white; border-radius:50%; width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; border:2px solid white; box-shadow:0 1px 3px rgba(0,0,0,.3);">${markerNum}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    const marker = L.marker([p.coords.lat, p.coords.lng], { icon }).addTo(map);
+    marker.bindPopup(`<b>${markerNum}. ${p.name}</b>`);
+    marker.on('click', ()=>focusRouteListOnStop(si));
+    markersByStopIdx[si] = marker;
+    points.push([p.coords.lat, p.coords.lng]);
+  });
+  expandedRouteMarkersByStopIdx = markersByStopIdx;
+
+  if(points.length > 1) L.polyline(points, { color:'#2C6E82', weight:3 }).addTo(map);
+
+  setTimeout(()=>{
+    // If the user collapsed/switched routes (or opened the editor, which also tears this down)
+    // within the delay, `map` is already removed — touching it here threw a real Leaflet
+    // "_leaflet_pos" error during testing. Bail out if this map is no longer the active one.
+    if(expandedRouteMap !== map) return;
+    map.invalidateSize();
+    if(points.length === 1) map.setView(points[0], 14);
+    else if(points.length > 1) map.fitBounds(points, { padding:[30,30] });
+    else map.setView([20,0], 2);
+  }, 50);
+}
+
+function focusRouteMapOnStop(si){
+  const marker = expandedRouteMarkersByStopIdx[si];
+  if(!marker || !expandedRouteMap) return;
+  expandedRouteMap.invalidateSize();
+  expandedRouteMap.setView(marker.getLatLng(), Math.max(expandedRouteMap.getZoom(), 14));
+  marker.openPopup();
+}
+
+function focusRouteListOnStop(si){
+  const row = document.querySelector(`.route-stop-row[data-stop-idx="${si}"]`);
+  if(!row) return;
+  row.scrollIntoView({behavior:'smooth', block:'center'});
+  document.querySelectorAll('.route-stop-row.highlighted').forEach(r=>r.classList.remove('highlighted'));
+  row.classList.add('highlighted');
+  setTimeout(()=>row.classList.remove('highlighted'), 2500);
+}
+
+function toggleExpandedRoute(idx){
+  expandedRouteIdx = expandedRouteIdx === idx ? null : idx;
+  renderRoutes();
+}
+
+function renderRoutes(){
+  // Leaflet needs a live container to bind to — any expanded map instance is torn down before
+  // the DOM it lives in gets replaced below, and rebuilt after if a route is still expanded.
+  if(expandedRouteMap){ expandedRouteMap.remove(); expandedRouteMap = null; }
+  expandedRouteMarkersByStopIdx = {};
+
+  const el = document.getElementById('routes-list');
+  const routes = tripData?.routes || [];
+  if(!routes.length){
+    el.innerHTML = '<p class="mono">No routes yet — use "+ Add route manually" or "✨ Generate routes with AI" above.</p>';
+    expandedRouteIdx = null;
+    return;
+  }
+  const base = findBasePlace();
+  const byCity = new Map();
+  routes.forEach((r,i)=>{
+    if(!byCity.has(r.city)) byCity.set(r.city, []);
+    byCity.get(r.city).push({r,i});
+  });
+  el.innerHTML = Array.from(byCity.entries()).map(([city, items])=>{
+    const cards = items.map(({r,i})=>{
+      const sequence = routeStopSequenceLine(r, base);
+      const provenance = r.generatedBy === 'manual' ? '✎ Manual' : '✨ AI-generated';
+      const expanded = expandedRouteIdx === i;
+      const totalTime = computeRouteTotalTime(r);
+      const totalTimeLine = totalTime != null ? `<p class="place-meta">Total time: ~${formatMinutes(totalTime)}</p>` : '';
+      return `<div class="card" style="margin-bottom:12px;">
+        <div class="place-name">${r.label} <span class="tag">${provenance}${r.edited ? ' (edited)' : ''}</span></div>
+        ${totalTimeLine}
+        <p class="place-meta">Total want rating: ${r.totalWantRating}</p>
+        <p class="place-meta">${sequence}</p>
+        <p class="place-meta" style="margin-top:8px;">Days:</p>
+        ${renderRouteDayChips(r.id)}
+        <div class="place-actions">
+          <button class="js-edit-route" data-idx="${i}">Edit</button>
+          <button class="js-expand-route" data-idx="${i}">${expanded ? 'Collapse ▴' : 'Expand ▾'}</button>
+          <button class="js-delete-route" data-idx="${i}">Delete</button>
+        </div>
+        ${expanded ? renderExpandedRouteHtml(r) : ''}
+      </div>`;
+    }).join('');
+    return `<h4 style="margin:18px 0 8px;">${city || 'Unassigned city'}</h4>${cards}`;
+  }).join('');
+
+  if(expandedRouteIdx !== null && routes[expandedRouteIdx]) initExpandedRouteMap(routes[expandedRouteIdx]);
+}
+
+async function deleteRoute(idx){
+  if(!confirm(`Delete "${tripData.routes[idx].label}"?`)) return;
+  const routes = tripData.routes.slice();
+  routes.splice(idx, 1);
+  await db.collection('tripData').doc(currentTripId).update({ routes });
+  tripData.routes = routes;
+  expandedRouteIdx = null;
+  renderRoutes();
+}
+// Assignment lives here on the Routes tab (a route is already being evaluated/compared here);
+// ordering when a day has more than one route lives on the Days tab instead, see below — the day
+// is the one place all of a day's routes are visible together.
+function renderRouteDayChips(routeId){
+  const days = tripData?.days || [];
+  if(!days.length) return '<p class="hint">Set trip dates (Edit trip details) to enable day assignment.</p>';
+  const chips = days.map(d=>{
+    const active = (d.assignedRoutes||[]).includes(routeId);
+    const shortDate = formatDateRange(d.date);
+    return `<button type="button" class="cat-chip js-route-day-chip ${active?'active':''}" data-route-id="${routeId}" data-date="${d.date}">${d.label}${shortDate?` (${shortDate})`:''}</button>`;
+  }).join('');
+  return `<div class="cat-picker">${chips}</div>`;
+}
+
+async function toggleRouteDayChip(routeId, date){
+  const days = (tripData.days||[]).map(d=>{
+    if(d.date !== date) return d;
+    const assigned = d.assignedRoutes||[];
+    const assignedRoutes = assigned.includes(routeId) ? assigned.filter(id=>id!==routeId) : [...assigned, routeId];
+    return { ...d, assignedRoutes };
+  });
+  await db.collection('tripData').doc(currentTripId).update({ days });
+  tripData.days = days;
+  renderRoutes();
+}
+
+document.getElementById('routes-list').addEventListener('click', e=>{
+  if(e.target.classList.contains('js-delete-route')) return deleteRoute(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-edit-route')) return openRouteEditor(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-expand-route')) return toggleExpandedRoute(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-route-day-chip')) return toggleRouteDayChip(e.target.dataset.routeId, e.target.dataset.date);
+  const stopRow = e.target.closest('.js-route-stop-click');
+  if(stopRow) return focusRouteMapOnStop(Number(stopRow.dataset.stopIdx));
+});
+
+// ---------- Manual route editor (also used to edit AI-generated routes) ----------
+let routeEditorMode = 'new'; // 'new' | 'edit'
+let routeEditorIdx = null;
+let routeEditorStops = [];
+
+let routeEditorMap = null;
+let routeEditorMarkersByStopIdx = {};
+
+function openRouteEditor(idx){
+  // The expanded-card map (if any) would otherwise sit on the page behind this modal — collapse
+  // it rather than have two live Leaflet instances of the same route disagree with each other.
+  if(expandedRouteIdx !== null){
+    expandedRouteIdx = null;
+    if(expandedRouteMap){ expandedRouteMap.remove(); expandedRouteMap = null; }
+    renderRoutes();
+  }
+
+  routeEditorMode = (idx === undefined || idx === null) ? 'new' : 'edit';
+  routeEditorIdx = routeEditorMode === 'edit' ? idx : null;
+  const existing = routeEditorMode === 'edit' ? tripData.routes[idx] : null;
+  routeEditorStops = existing ? JSON.parse(JSON.stringify(existing.stops)) : [];
+
+  // A brand-new route starts pre-populated with the base as both bookends when one is set —
+  // convenience default, not locked in: the user can still remove/reorder it like any other stop.
+  // Existing routes aren't touched here even if they're missing it, to avoid silently mutating
+  // saved data just from opening the editor — the search below can add it manually instead.
+  if(routeEditorMode === 'new'){
+    const base = findBasePlace();
+    if(base?.coords){
+      const baseStop = { type:'place', placeId: base.id, note:'', stayDuration: null, travel: [] };
+      routeEditorStops = [baseStop, JSON.parse(JSON.stringify(baseStop))];
+    }
+  }
+
+  document.getElementById('route-editor-title').textContent = routeEditorMode === 'edit' ? 'Edit route' : 'Add route';
+  document.getElementById('route-editor-error').textContent = '';
+  document.getElementById('route-editor-label').value = existing?.label || '';
+  document.getElementById('route-editor-add-search').value = '';
+  document.getElementById('route-editor-add-results').classList.add('hidden');
+
+  const citySel = document.getElementById('route-editor-city');
+  const cities = tripData?.meta?.cities || [];
+  citySel.innerHTML = cities.length
+    ? cities.map(c=>`<option value="${c.name}">${c.name}${c.country ? ', '+c.country : ''}</option>`).join('')
+    : '<option value="">(none — add a city first)</option>';
+  if(existing?.city) citySel.value = existing.city;
+
+  // Show the modal BEFORE building the map — Leaflet initializing markers against a still-hidden
+  // (zero-size) container is what caused a real "_leaflet_pos" error here during testing.
+  document.getElementById('route-editor-modal').classList.remove('hidden');
+  renderRouteEditorStops();
+  setTimeout(()=>routeEditorMap && routeEditorMap.invalidateSize(), 60);
+}
+function closeRouteEditor(){ document.getElementById('route-editor-modal').classList.add('hidden'); }
+document.getElementById('btn-add-route').addEventListener('click', ()=>openRouteEditor());
+document.getElementById('route-editor-cancel').addEventListener('click', closeRouteEditor);
+document.getElementById('route-editor-modal').addEventListener('click', e=>{
+  if(e.target.id === 'route-editor-modal') closeRouteEditor();
+});
+
+// The editor's map container is a single static element reused across every open (unlike the
+// per-route expanded-card containers, which get a fresh id each time) — create the Leaflet
+// instance once and just update its markers/line/view on every call, same pattern as the main
+// Places tab's renderMap().
+function renderRouteEditorMap(){
+  const container = document.getElementById('route-editor-map');
+  if(!container) return;
+  if(!routeEditorMap){
+    routeEditorMap = L.map(container).setView([20, 0], 2); // defined view before any markers are added
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(routeEditorMap);
+  }
+  routeEditorMap.eachLayer(layer => { if(layer instanceof L.Marker || layer instanceof L.Polyline) routeEditorMap.removeLayer(layer); });
+
+  const points = [];
+  const markersByStopIdx = {};
+  let markerNum = 0;
+  routeEditorStops.forEach((s, si)=>{
+    if(stopType(s) !== 'place') return;
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    if(!p || !p.coords) return;
+    markerNum++;
+    const icon = L.divIcon({
+      className: 'route-num-marker',
+      html: `<div style="background:var(--harbor); color:white; border-radius:50%; width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; border:2px solid white; box-shadow:0 1px 3px rgba(0,0,0,.3);">${markerNum}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    const marker = L.marker([p.coords.lat, p.coords.lng], { icon }).addTo(routeEditorMap);
+    marker.bindPopup(`<b>${markerNum}. ${p.name}</b>`);
+    markersByStopIdx[si] = marker;
+    points.push([p.coords.lat, p.coords.lng]);
+  });
+  routeEditorMarkersByStopIdx = markersByStopIdx;
+  if(points.length > 1) L.polyline(points, { color:'#2C6E82', weight:3 }).addTo(routeEditorMap);
+
+  setTimeout(()=>{
+    routeEditorMap.invalidateSize();
+    if(points.length === 1) routeEditorMap.setView(points[0], 14);
+    else if(points.length > 1) routeEditorMap.fitBounds(points, { padding:[30,30] });
+    else routeEditorMap.setView([20,0], 2);
+  }, 50);
+}
+
+function renderRouteEditorStops(){
+  const el = document.getElementById('route-editor-stops');
+  if(!routeEditorStops.length){
+    el.innerHTML = '<p class="mono">No stops yet — search below to add a place, or add a break.</p>';
+  }else{
+    el.innerHTML = routeEditorStops.map((s, i)=>{
+      const isBreak = stopType(s) === 'break';
+      const travel = (s.travel && s.travel[0]) || {};
+      const isCustomType = travel.type && !TRAVEL_LEG_TYPES.includes(travel.type);
+      const controls = `<div style="display:flex; gap:6px;">
+        <button type="button" class="btn-small route-stop-up" data-idx="${i}" ${i===0?'disabled':''}>↑</button>
+        <button type="button" class="btn-small route-stop-down" data-idx="${i}" ${i===routeEditorStops.length-1?'disabled':''}>↓</button>
+        <button type="button" class="btn-small route-stop-remove" data-idx="${i}">Remove</button>
+      </div>`;
+      const body = isBreak
+        ? `<div class="modal-grid" style="margin-top:8px;">
+            <div>
+              <label>Duration (minutes)</label>
+              <input type="number" min="0" class="route-break-duration" data-idx="${i}" placeholder="e.g. 45" value="${typeof s.duration==='number'?s.duration:''}">
+            </div>
+            <div>
+              <label>Note</label>
+              <input type="text" class="route-break-note" data-idx="${i}" placeholder="e.g. Lunch at a caf&eacute;" value="${s.note||''}">
+            </div>
+          </div>`
+        : `<div class="modal-grid" style="margin-top:8px;">
+            <div style="grid-column:span 1;">
+              <label>Note for this stop</label>
+              <input type="text" class="route-stop-note" data-idx="${i}" placeholder="Optional" value="${s.note||''}">
+            </div>
+            <div>
+              <label>Stay duration (minutes)</label>
+              <input type="number" min="0" class="route-stop-stay-duration" data-idx="${i}" placeholder="e.g. 90" value="${typeof s.stayDuration==='number'?s.stayDuration:''}">
+            </div>
+          </div>`;
+      const name = isBreak ? '☕ Break' : (((tripData.places||[]).find(p=>p.id===s.placeId))?.name || s.placeId || '(unknown place)');
+      const currency = tripData?.meta?.defaultCurrency;
+      // Two rows of two labeled fields each (rather than five fields crammed into one row) so the
+      // unit is always visible, not just in a placeholder that disappears once a value is typed —
+      // seeing bare numbers with no label was the actual complaint that prompted this layout.
+      const travelRow = i < routeEditorStops.length - 1
+        ? `<div style="margin:10px 0 0 20px; padding-top:10px; border-top:1px dashed var(--line);">
+            <div class="modal-grid">
+              <div>
+                <label>Type</label>
+                <select class="route-travel-type-select" data-idx="${i}">
+                  <option value="" ${!travel.type?'selected':''}>— type —</option>
+                  ${TRAVEL_LEG_TYPES.map(t=>`<option value="${t}" ${travel.type===t?'selected':''}>${formatCat(t)}</option>`).join('')}
+                  <option value="__custom__" ${isCustomType?'selected':''}>Custom…</option>
+                </select>
+                <input type="text" class="route-travel-type-custom${isCustomType?'':' hidden'}" data-idx="${i}" placeholder="Custom type" value="${isCustomType?travel.type:''}" style="margin-top:6px;">
+              </div>
+              <div>
+                <label>Distance (meters)</label>
+                <input type="number" min="0" class="route-travel-distance" data-idx="${i}" placeholder="e.g. 600" value="${typeof travel.distance==='number'?travel.distance:''}">
+              </div>
+              <div>
+                <label>Time (minutes)</label>
+                <input type="number" min="0" class="route-travel-time" data-idx="${i}" placeholder="e.g. 8" value="${typeof travel.time==='number'?travel.time:''}">
+              </div>
+              <div>
+                <label>Cost${currency?` (${currency})`:' (no currency set for this trip)'}</label>
+                <input type="number" min="0" step="0.01" class="route-travel-cost" data-idx="${i}" placeholder="e.g. 24" value="${typeof travel.cost==='number'?travel.cost:''}">
+              </div>
+            </div>
+            <label>Details</label>
+            <input type="text" class="route-travel-details" data-idx="${i}" placeholder="Line number, platform, etc." value="${travel.details||''}">
+          </div>`
+        : '';
+      return `<div class="card" style="margin-bottom:10px; ${isBreak ? 'border-color:var(--mustard);' : ''}">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div class="place-name">${i+1}. ${name}</div>
+          ${controls}
+        </div>
+        ${body}
+      </div>${travelRow}`;
+    }).join('');
+  }
+  renderRouteEditorMap();
+}
+
+function ensureTravel(s){
+  if(!s.travel || !s.travel[0]) s.travel = [{type:'',distance:null,time:null,cost:null,details:''}];
+}
+
+// travel[] is stored on the "from" stop and describes the leg to whichever stop is next — it
+// belongs to the EDGE between two stops, not to either stop itself. Swapping/removing stops
+// changes which edges exist, so any travel data left sitting at an affected index would silently
+// describe a leg that no longer exists (e.g. reorder A,B,C to A,C,B and A's old "distance to B"
+// numbers would still show up as if they described "distance to C"). Clearing rather than trying
+// to guess a corrected value: there's no way to know the real distance/time/cost for a leg that
+// was never entered, and showing a wrong number is worse than showing a blank one to refill.
+function clearStopTravel(idx){
+  if(routeEditorStops[idx]) routeEditorStops[idx].travel = [];
+}
+
+document.getElementById('route-editor-stops').addEventListener('click', e=>{
+  const up = e.target.closest('.route-stop-up');
+  const down = e.target.closest('.route-stop-down');
+  const remove = e.target.closest('.route-stop-remove');
+  if(up){
+    const i = Number(up.dataset.idx);
+    [routeEditorStops[i-1], routeEditorStops[i]] = [routeEditorStops[i], routeEditorStops[i-1]];
+    clearStopTravel(i-2);
+    clearStopTravel(i-1);
+    clearStopTravel(i);
+    renderRouteEditorStops();
+  }else if(down){
+    const i = Number(down.dataset.idx);
+    [routeEditorStops[i+1], routeEditorStops[i]] = [routeEditorStops[i], routeEditorStops[i+1]];
+    clearStopTravel(i-1);
+    clearStopTravel(i);
+    clearStopTravel(i+1);
+    renderRouteEditorStops();
+  }else if(remove){
+    const i = Number(remove.dataset.idx);
+    routeEditorStops.splice(i, 1);
+    clearStopTravel(i-1); // the stop before the removed one now points at a different "next"
+    renderRouteEditorStops();
+  }
+});
+document.getElementById('route-editor-stops').addEventListener('change', e=>{
+  if(!e.target.classList.contains('route-travel-type-select')) return;
+  const i = Number(e.target.dataset.idx);
+  if(Number.isNaN(i) || !routeEditorStops[i]) return;
+  const s = routeEditorStops[i];
+  ensureTravel(s);
+  const customInput = document.querySelector(`.route-travel-type-custom[data-idx="${i}"]`);
+  if(e.target.value === '__custom__'){
+    customInput.classList.remove('hidden');
+    customInput.focus();
+  }else{
+    customInput.classList.add('hidden');
+    s.travel[0].type = e.target.value;
+  }
+});
+// Text/number fields update the draft array in place without a full re-render, so typing doesn't
+// lose focus/cursor position — only structural changes (add/remove/reorder) re-render, and only
+// stop add/remove/reorder affects the map, so this handler never needs to touch it.
+document.getElementById('route-editor-stops').addEventListener('input', e=>{
+  const t = e.target;
+  const i = Number(t.dataset.idx);
+  if(Number.isNaN(i) || !routeEditorStops[i]) return;
+  const s = routeEditorStops[i];
+  const numOrNull = v => v === '' ? null : Number(v);
+  if(t.classList.contains('route-stop-note')) s.note = t.value;
+  else if(t.classList.contains('route-stop-stay-duration')) s.stayDuration = numOrNull(t.value);
+  else if(t.classList.contains('route-break-duration')) s.duration = numOrNull(t.value);
+  else if(t.classList.contains('route-break-note')) s.note = t.value;
+  else if(t.classList.contains('route-travel-type-custom')){ ensureTravel(s); s.travel[0].type = t.value; }
+  else if(t.classList.contains('route-travel-distance')){ ensureTravel(s); s.travel[0].distance = numOrNull(t.value); }
+  else if(t.classList.contains('route-travel-time')){ ensureTravel(s); s.travel[0].time = numOrNull(t.value); }
+  else if(t.classList.contains('route-travel-cost')){ ensureTravel(s); s.travel[0].cost = numOrNull(t.value); }
+  else if(t.classList.contains('route-travel-details')){ ensureTravel(s); s.travel[0].details = t.value; }
+});
+
+function renderRouteAddResults(){
+  const q = document.getElementById('route-editor-add-search').value;
+  const resultsEl = document.getElementById('route-editor-add-results');
+  const city = document.getElementById('route-editor-city').value;
+  // Shows everything (not just query matches) on focus with an empty query too — in case the
+  // user can't recall the exact name, they can just scan the whole list for this city.
+  // Base of operations is now a valid stop (routes can literally include it as first/last), so
+  // it's no longer excluded here — findable and addable like any other place.
+  const matches = (tripData?.places||[])
+    .filter(p => p.city === city && placeMatchesKeywords(p, q))
+    .slice(0, 30);
+  resultsEl.innerHTML = matches.length
+    ? matches.map(p=>{
+        const catText = (p.cat||[]).map(formatCat).join(', ');
+        const meta = [catText, p.wantRating ? `${p.wantRating}/10` : null].filter(Boolean).join(' · ');
+        return `<div class="autocomplete-item" data-place-id="${p.id}">
+          <div>${p.name}</div>
+          ${meta ? `<div class="place-meta" style="font-size:.75rem;">${meta}</div>` : ''}
+          <a class="place-link" style="font-size:.75rem;" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>
+        </div>`;
+      }).join('')
+    : '<div class="autocomplete-item" style="opacity:.6; cursor:default;">No matches</div>';
+  resultsEl.classList.remove('hidden');
+}
+document.getElementById('route-editor-add-search').addEventListener('input', renderRouteAddResults);
+document.getElementById('route-editor-add-search').addEventListener('focus', renderRouteAddResults);
+document.getElementById('route-editor-add-results').addEventListener('click', e=>{
+  if(e.target.closest('a')) return; // let the "Map ↗" link open normally, don't also add the place
+  const item = e.target.closest('.autocomplete-item');
+  if(!item || !item.dataset.placeId) return;
+  routeEditorStops.push({ type:'place', placeId: item.dataset.placeId, note:'', stayDuration: null, travel: [] });
+  document.getElementById('route-editor-add-search').value = '';
+  document.getElementById('route-editor-add-results').classList.add('hidden');
+  document.getElementById('route-editor-add-results').innerHTML = '';
+  renderRouteEditorStops();
+});
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#route-editor-add-search') && !e.target.closest('#route-editor-add-results')){
+    document.getElementById('route-editor-add-results').classList.add('hidden');
+  }
+});
+document.getElementById('route-editor-add-break').addEventListener('click', ()=>{
+  routeEditorStops.push({ type:'break', note:'', duration:null, travel: [] });
+  renderRouteEditorStops();
+});
+
+document.getElementById('route-editor-save').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('route-editor-error');
+  errEl.textContent = '';
+  const label = document.getElementById('route-editor-label').value.trim();
+  if(!label){ errEl.textContent = 'Route label is required.'; return; }
+  const city = document.getElementById('route-editor-city').value;
+
+  const stops = routeEditorStops.map(s => stopType(s) === 'break'
+    ? { type:'break', note: s.note||'', duration: s.duration ?? null, travel: s.travel||[] }
+    : { type:'place', placeId: s.placeId, note: s.note||'', stayDuration: s.stayDuration ?? null, travel: s.travel||[] });
+  const totalWantRating = stops.reduce((sum, s)=>{
+    if(s.type !== 'place') return sum;
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    return sum + (p?.wantRating || 0);
+  }, 0);
+
+  const routes = (tripData.routes || []).slice();
+  if(routeEditorMode === 'edit'){
+    const existing = routes[routeEditorIdx];
+    routes[routeEditorIdx] = { ...existing, city, label, stops, totalWantRating, edited: true };
+  }else{
+    routes.push({
+      id: slugify(label) + '-' + Date.now().toString(36),
+      city, label, stops, totalWantRating, generatedBy: 'manual', edited: true
+    });
+  }
+  await db.collection('tripData').doc(currentTripId).update({ routes });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.routes = routes;
+  expandedRouteIdx = null;
+  renderRoutes();
+  closeRouteEditor();
+});
+
+// ---------- Day-by-day (Phase 4 assignment happens on the Routes tab above; this is Phase 5
+// execution — a day picker, then a route overview, then a single-stop detail view) ----------
+// toISOString() converts to UTC, which silently shifts the date backward a day for anyone in a
+// timezone ahead of UTC (local midnight is still "yesterday" in UTC) — read back with the same
+// local getters used to construct the Date, never toISOString(), to avoid that entirely.
+function isoDatesInRange(startIso, endIso){
+  const dates = [];
+  let cur = new Date(startIso + 'T00:00:00');
+  const end = new Date(endIso + 'T00:00:00');
+  while(cur <= end){
+    const y = cur.getFullYear(), m = String(cur.getMonth()+1).padStart(2,'0'), d = String(cur.getDate()).padStart(2,'0');
+    dates.push(`${y}-${m}-${d}`);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+// Days mirror the trip's date range rather than being manually managed — extending the trip adds
+// days, shortening it removes them. A removed day's assignedRoutes just goes away with it; the
+// routes themselves are untouched (no reverse reference to clean up, since assignment only lives
+// on days[].assignedRoutes).
+async function syncDaysToTripDates(){
+  const { startDate, endDate } = tripData?.meta || {};
+  const existing = tripData?.days || [];
+  const wantedDates = (startDate && endDate) ? isoDatesInRange(startDate, endDate) : [];
+  const wantedSet = new Set(wantedDates);
+
+  const kept = existing.filter(d => wantedSet.has(d.date));
+  const keptDates = new Set(kept.map(d=>d.date));
+  const added = wantedDates.filter(date => !keptDates.has(date)).map(date => ({
+    label: `Day ${wantedDates.indexOf(date)+1}`, date, city: '', assignedRoutes: []
+  }));
+  const merged = kept.concat(added).sort((a,b)=> a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  if(JSON.stringify(existing.map(d=>d.date)) === JSON.stringify(merged.map(d=>d.date))) return;
+  await db.collection('tripData').doc(currentTripId).update({ days: merged });
+  tripData.days = merged;
+}
+
+let daysSelectedDate = null;
+let daysSelectedRouteId = null;
+let daysSelectedStopIndex = null; // null = Level 2 (route overview); a number = Level 3 (one stop)
+let dayRouteMap = null;
+let dayRouteMarkersByStopIdx = {};
+
+function todayIso(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// routeId+placeId (the original schema note) doesn't work once breaks exist (no placeId at all)
+// or a place appears twice in one route — position is the only thing always unambiguous.
+function routeStopKey(routeId, stopIdx){ return `${routeId}:${stopIdx}`; }
+
+function isRouteComplete(route){
+  if(!route.stops.length) return false;
+  return route.stops.every((s,si) => !!tripNotes.routeStops?.[routeStopKey(route.id, si)]?.done);
+}
+
+async function renderDays(){
+  await syncDaysToTripDates();
+  const days = tripData?.days || [];
+  const sel = document.getElementById('days-day-select');
+
+  if(!days.length){
+    sel.innerHTML = '<option value="">(none — set trip dates in Edit trip details)</option>';
+    document.getElementById('days-route-picker').innerHTML = '';
+    document.getElementById('days-content').innerHTML = '<p class="mono">No days yet.</p>';
+    if(dayRouteMap){ dayRouteMap.remove(); dayRouteMap = null; }
+    return;
+  }
+
+  if(daysSelectedDate === null || !days.some(d=>d.date===daysSelectedDate)){
+    const todayMatch = days.find(d=>d.date === todayIso());
+    daysSelectedDate = todayMatch ? todayMatch.date : days[0].date;
+    daysSelectedRouteId = null;
+    daysSelectedStopIndex = null;
+  }
+
+  sel.innerHTML = days.map(d=>`<option value="${d.date}" ${d.date===daysSelectedDate?'selected':''}>${d.label} — ${formatDateRange(d.date)}</option>`).join('');
+  renderDaysLevel2And3();
+}
+document.getElementById('days-day-select').addEventListener('change', e=>{
+  daysSelectedDate = e.target.value;
+  daysSelectedRouteId = null;
+  daysSelectedStopIndex = null;
+  renderDaysLevel2And3();
+});
+
+function renderDaysLevel2And3(){
+  const day = (tripData.days||[]).find(d=>d.date === daysSelectedDate);
+  const pickerEl = document.getElementById('days-route-picker');
+  const contentEl = document.getElementById('days-content');
+  if(!day || !(day.assignedRoutes||[]).length){
+    pickerEl.innerHTML = '';
+    contentEl.innerHTML = '<p class="mono">No routes assigned to this day yet — assign some from the Routes tab.</p>';
+    if(dayRouteMap){ dayRouteMap.remove(); dayRouteMap = null; }
+    return;
+  }
+
+  const routes = day.assignedRoutes.map(id => (tripData.routes||[]).find(r=>r.id===id)).filter(Boolean);
+  if(!routes.length){
+    pickerEl.innerHTML = '';
+    contentEl.innerHTML = '<p class="mono">No routes assigned to this day yet — assign some from the Routes tab.</p>';
+    if(dayRouteMap){ dayRouteMap.remove(); dayRouteMap = null; }
+    return;
+  }
+  if(!daysSelectedRouteId || !routes.some(r=>r.id===daysSelectedRouteId)){
+    const firstIncomplete = routes.find(r=>!isRouteComplete(r));
+    daysSelectedRouteId = (firstIncomplete || routes[0]).id;
+    daysSelectedStopIndex = null;
+  }
+
+  if(routes.length > 1){
+    pickerEl.innerHTML = routes.map((r,idx)=>{
+      const total = r.stops.length;
+      const done = r.stops.filter((s,si)=>tripNotes.routeStops?.[routeStopKey(r.id,si)]?.done).length;
+      const active = r.id === daysSelectedRouteId;
+      return `<div style="display:flex; align-items:center; gap:4px;">
+        <button type="button" class="cat-chip js-days-select-route ${active?'active':''}" data-route-id="${r.id}">${r.label} (${done}/${total})</button>
+        <button type="button" class="btn-small js-days-route-up" data-idx="${idx}" ${idx===0?'disabled':''}>↑</button>
+        <button type="button" class="btn-small js-days-route-down" data-idx="${idx}" ${idx===routes.length-1?'disabled':''}>↓</button>
+        <button type="button" class="btn-small js-days-route-remove" data-idx="${idx}">Remove</button>
+      </div>`;
+    }).join('');
+  }else{
+    pickerEl.innerHTML = `<div style="display:flex; align-items:center; gap:4px;">
+      <span class="tag">${routes[0].label}</span>
+      <button type="button" class="btn-small js-days-route-remove" data-idx="0">Remove from day</button>
+    </div>`;
+  }
+
+  const route = routes.find(r=>r.id===daysSelectedRouteId);
+  if(daysSelectedStopIndex !== null){
+    if(dayRouteMap){ dayRouteMap.remove(); dayRouteMap = null; }
+    contentEl.innerHTML = renderDayStopDetailHtml(route, daysSelectedStopIndex);
+  }else{
+    contentEl.innerHTML = renderDayRouteOverviewHtml(route);
+    initDayRouteMap(route);
+  }
+}
+
+document.getElementById('days-route-picker').addEventListener('click', async e=>{
+  const selectBtn = e.target.closest('.js-days-select-route');
+  const up = e.target.closest('.js-days-route-up');
+  const down = e.target.closest('.js-days-route-down');
+  const remove = e.target.closest('.js-days-route-remove');
+  if(selectBtn){
+    daysSelectedRouteId = selectBtn.dataset.routeId;
+    daysSelectedStopIndex = null;
+    renderDaysLevel2And3();
+    return;
+  }
+  if(!up && !down && !remove) return;
+  const day = (tripData.days||[]).find(d=>d.date === daysSelectedDate);
+  if(!day) return;
+  const assignedRoutes = day.assignedRoutes.slice();
+  if(up){
+    const idx = Number(up.dataset.idx);
+    [assignedRoutes[idx-1], assignedRoutes[idx]] = [assignedRoutes[idx], assignedRoutes[idx-1]];
+  }else if(down){
+    const idx = Number(down.dataset.idx);
+    [assignedRoutes[idx+1], assignedRoutes[idx]] = [assignedRoutes[idx], assignedRoutes[idx+1]];
+  }else if(remove){
+    assignedRoutes.splice(Number(remove.dataset.idx), 1);
+  }
+  const days = (tripData.days||[]).map(d => d.date === daysSelectedDate ? { ...d, assignedRoutes } : d);
+  await db.collection('tripData').doc(currentTripId).update({ days });
+  tripData.days = days;
+  daysSelectedStopIndex = null;
+  renderDaysLevel2And3();
+});
+
+// Level 2: condensed list + sticky map, heavily reusing the Routes-tab expandable-view patterns
+// (renderExpandedRouteHtml/initExpandedRouteMap) — the two differences are a stop-done visual
+// marker and every row (not just ones with coords) being clickable into Level 3, since execution
+// needs to mark ANY stop done/rated regardless of whether it has a map marker.
+function renderDayRouteOverviewHtml(route){
+  const base = findBasePlace();
+  const rows = route.stops.map((s,si)=>{
+    const leg = s.travel && s.travel[0];
+    const legStr = formatLeg(leg, true);
+    const legLine = legStr ? `<div class="place-meta" style="margin:4px 0 8px 14px;">↓ ${legStr}</div>` : '';
+    const done = !!tripNotes.routeStops?.[routeStopKey(route.id, si)]?.done;
+    const doneClass = done ? ' stop-done' : '';
+    if(stopType(s) === 'break'){
+      const breakDurStr = formatMinutes(s.duration);
+      return `<div class="route-stop-row js-day-stop-click${doneClass}" data-stop-idx="${si}" style="cursor:pointer;">
+        <div class="place-meta">${si+1}. ☕ Break${breakDurStr ? ` (${breakDurStr})` : ''}${done ? ' ✓' : ''}</div>
+        ${s.note ? `<div class="place-meta">${s.note}</div>` : ''}
+      </div>${legLine}`;
+    }
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    const stayStr = formatMinutes(s.stayDuration);
+    const baseLabel = isBaseStop(s, base) ? (si===0 ? 'Start: ' : si===route.stops.length-1 ? 'End: ' : '') : '';
+    return `<div class="route-stop-row js-day-stop-click${doneClass}" data-stop-idx="${si}" style="cursor:pointer;">
+      <div class="place-name" style="font-size:.95rem;">${si+1}. ${baseLabel}${p ? p.name : (s.placeId || '(unknown place)')}${stayStr ? ` <span class="place-meta">(${stayStr})</span>` : ''}${done ? ' ✓' : ''}</div>
+    </div>${legLine}`;
+  }).join('');
+  return `<div class="route-split">
+    <div class="route-split-pane">${rows}</div>
+    <div class="route-split-pane day-route-map-pane">
+      <div class="route-map-container" id="day-route-map"></div>
+    </div>
+  </div>`;
+}
+
+function initDayRouteMap(route){
+  const container = document.getElementById('day-route-map');
+  if(!container) return;
+  const map = L.map(container).setView([20, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(map);
+  dayRouteMap = map;
+
+  const points = [];
+  const markersByStopIdx = {};
+  let markerNum = 0;
+  route.stops.forEach((s, si)=>{
+    if(stopType(s) !== 'place') return;
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    if(!p || !p.coords) return;
+    markerNum++;
+    const done = !!tripNotes.routeStops?.[routeStopKey(route.id, si)]?.done;
+    const icon = L.divIcon({
+      className: 'route-num-marker',
+      html: `<div style="background:${done?'var(--moss)':'var(--harbor)'}; color:white; border-radius:50%; width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; border:2px solid white; box-shadow:0 1px 3px rgba(0,0,0,.3);">${markerNum}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    const marker = L.marker([p.coords.lat, p.coords.lng], { icon }).addTo(map);
+    marker.bindPopup(`<b>${markerNum}. ${p.name}</b>`);
+    marker.on('click', ()=>focusDayListOnStop(si));
+    markersByStopIdx[si] = marker;
+    points.push([p.coords.lat, p.coords.lng]);
+  });
+  dayRouteMarkersByStopIdx = markersByStopIdx;
+  if(points.length > 1) L.polyline(points, { color:'#2C6E82', weight:3 }).addTo(map);
+
+  setTimeout(()=>{
+    if(dayRouteMap !== map) return; // torn down / superseded while this was pending
+    map.invalidateSize();
+    if(points.length === 1) map.setView(points[0], 14);
+    else if(points.length > 1) map.fitBounds(points, { padding:[30,30] });
+  }, 50);
+}
+
+function focusDayListOnStop(si){
+  const row = document.querySelector(`#days-content .route-stop-row[data-stop-idx="${si}"]`);
+  if(!row) return;
+  row.scrollIntoView({behavior:'smooth', block:'center'});
+  document.querySelectorAll('#days-content .route-stop-row.highlighted').forEach(r=>r.classList.remove('highlighted'));
+  row.classList.add('highlighted');
+  setTimeout(()=>row.classList.remove('highlighted'), 2500);
+}
+
+// Level 3: full detail for one stop, no map — the actual execution controls (done/rating/note).
+function renderDayStopDetailHtml(route, stopIdx){
+  const s = route.stops[stopIdx];
+  const key = routeStopKey(route.id, stopIdx);
+  const rn = tripNotes.routeStops?.[key] || {};
+  const done = !!rn.done;
+  const myUid = currentUser?.uid;
+  const myRating = (myUid && rn.ratings?.[myUid]) || {};
+  const otherRatings = Object.entries(rn.ratings||{}).filter(([uid])=>uid !== myUid);
+
+  let detailHtml;
+  if(stopType(s) === 'break'){
+    const durStr = formatMinutes(s.duration);
+    detailHtml = `<div class="place-name">☕ Break</div>
+      ${durStr ? `<p class="place-meta">Duration: ${durStr}</p>` : ''}
+      ${s.note ? `<p class="place-meta">${s.note}</p>` : ''}`;
+  }else{
+    const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
+    const catLine = p && (p.cat||[]).length ? `<p class="place-meta">${(p.cat||[]).map(formatCat).join(', ')}</p>` : '';
+    const descLine = p?.note ? `<p class="place-meta">${p.note}</p>` : '';
+    const stayStr = formatMinutes(s.stayDuration);
+    detailHtml = `<div class="place-name">${p ? p.name : (s.placeId || '(unknown place)')}</div>
+      ${catLine}${descLine}
+      ${stayStr ? `<p class="place-meta">Stay: ${stayStr}</p>` : ''}
+      ${s.note ? `<p class="place-meta">Planning note: ${s.note}</p>` : ''}`;
+  }
+
+  const ratingUI = stopType(s) !== 'break' ? `
+    <div class="modal-grid" style="margin-top:14px;">
+      <div>
+        <label>Your rating (1-10)</label>
+        <input type="number" min="1" max="10" id="day-stop-rating-value" value="${myRating.value ?? ''}">
+      </div>
+      <div>
+        <label>Your note</label>
+        <input type="text" id="day-stop-rating-note" value="${myRating.note||''}">
+      </div>
+    </div>
+    ${otherRatings.length ? `<p class="place-meta" style="margin-top:8px;">${otherRatings.map(([uid,r])=>`${r.email||uid}: ${r.value ?? '–'}/10${r.note?` — ${r.note}`:''}`).join('<br>')}</p>` : ''}
+  ` : '';
+
+  return `<div class="card">
+    <button type="button" class="btn-small" id="day-stop-back">← Back to route</button>
+    <div style="margin-top:12px;">${detailHtml}</div>
+    <label style="margin-top:14px; display:block; cursor:pointer;">
+      <input type="checkbox" id="day-stop-done" ${done?'checked':''}> Mark as done
+    </label>
+    <div style="margin-top:10px;">
+      <label>Note</label>
+      <input type="text" id="day-stop-note" value="${rn.note||''}">
+    </div>
+    ${ratingUI}
+  </div>`;
+}
+
+async function saveDayStopField(routeId, stopIdx, field, value){
+  const key = routeStopKey(routeId, stopIdx);
+  await db.collection('tripNotes').doc(currentTripId).set({ routeStops: { [key]: { [field]: value } } }, { merge: true });
+  if(!tripNotes.routeStops) tripNotes.routeStops = {};
+  tripNotes.routeStops[key] = { ...(tripNotes.routeStops[key]||{}), [field]: value };
+}
+async function saveDayStopRating(routeId, stopIdx){
+  const key = routeStopKey(routeId, stopIdx);
+  const valueRaw = document.getElementById('day-stop-rating-value').value;
+  const value = valueRaw === '' ? null : Number(valueRaw);
+  const note = document.getElementById('day-stop-rating-note').value;
+  const uid = currentUser.uid;
+  const ratingEntry = { value, note, email: currentUser.email };
+  await db.collection('tripNotes').doc(currentTripId).set({ routeStops: { [key]: { ratings: { [uid]: ratingEntry } } } }, { merge: true });
+  if(!tripNotes.routeStops) tripNotes.routeStops = {};
+  const existing = tripNotes.routeStops[key] || {};
+  tripNotes.routeStops[key] = { ...existing, ratings: { ...(existing.ratings||{}), [uid]: ratingEntry } };
+}
+
+document.getElementById('days-content').addEventListener('click', e=>{
+  if(e.target.id === 'day-stop-back'){
+    daysSelectedStopIndex = null;
+    renderDaysLevel2And3();
+    return;
+  }
+  const stopRow = e.target.closest('.js-day-stop-click');
+  if(stopRow){
+    daysSelectedStopIndex = Number(stopRow.dataset.stopIdx);
+    renderDaysLevel2And3();
+  }
+});
+document.getElementById('days-content').addEventListener('change', async e=>{
+  if(daysSelectedStopIndex === null) return;
+  if(e.target.id === 'day-stop-done'){
+    await saveDayStopField(daysSelectedRouteId, daysSelectedStopIndex, 'done', e.target.checked);
+  }else if(e.target.id === 'day-stop-note'){
+    await saveDayStopField(daysSelectedRouteId, daysSelectedStopIndex, 'note', e.target.value);
+  }else if(e.target.id === 'day-stop-rating-value' || e.target.id === 'day-stop-rating-note'){
+    await saveDayStopRating(daysSelectedRouteId, daysSelectedStopIndex);
+  }
+});
+
+// ---------- Coordinate fixer (OpenStreetMap Nominatim) ----------
+function coordsNeedsCheck(p){ return !p.coords || p.coordsSource === 'ai'; }
+
+function updateCoordsPendingBadge(){
+  const el = document.getElementById('coords-pending-count');
+  const count = (tripData?.places||[]).filter(coordsNeedsCheck).length;
+  el.textContent = count ? ` (${count})` : '';
+}
+
+async function nominatimSearch(query){
+  if(!query) return null;
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if(!data.length) return null;
+    return { lat: Number(data[0].lat), lng: Number(data[0].lon), displayName: data[0].display_name };
+  }catch(err){
+    console.warn('Geocoding failed for', query, err);
+    return null;
+  }
+}
+
+async function geocodePlace(place){
+  const withArea = [place.name, place.area, place.city].filter(Boolean).join(', ');
+  const result = await nominatimSearch(withArea);
+  if(result) return result;
+  // area is often an informal/non-OSM name (e.g. "City Centre") that can zero out an otherwise
+  // findable place — fall back to a simpler query without it before giving up.
+  const withoutArea = [place.name, place.city].filter(Boolean).join(', ');
+  if(withoutArea === withArea) return null;
+  await new Promise(r => setTimeout(r, 1100));
+  return nominatimSearch(withoutArea);
+}
+
+// Live, map-integrated review: background fetch keeps running (rate-limited) independent of
+// how fast the user reviews — the user just can't get ahead of it.
+let coordsFixerActive = false;
+let coordsReviewQueue = []; // [{ idx, place, found: null|{lat,lng,displayName} }]
+let coordsShownCount = 0;
+let coordsPendingTotal = 0;
+let coordsBackgroundDone = false;
+let coordsWaitingForNext = false;
+let coordsNotFoundNames = [];
+let coordsAutoConfirmedNames = [];
+let coordsFirstSetNames = [];
+let coordsCheckedCount = 0;
+let coordsOldMarker = null, coordsNewMarker = null, coordsLine = null;
+
+// Below this, a "difference" is just floating-point noise from two independent geocoders for the
+// same building — not worth interrupting the user to ask about (spotted plenty of ~50m cases).
+const COORDS_AUTO_CONFIRM_THRESHOLD_M = 100;
+function haversineMeters(lat1, lng1, lat2, lng2){
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function clearCoordsCompareOverlay(){
+  if(coordsOldMarker){ leafletMap.removeLayer(coordsOldMarker); coordsOldMarker = null; }
+  if(coordsNewMarker){ leafletMap.removeLayer(coordsNewMarker); coordsNewMarker = null; }
+  if(coordsLine){ leafletMap.removeLayer(coordsLine); coordsLine = null; }
+}
+
+// The per-place "Check coordinates" action re-checks places already sourced from OSM or entered
+// by hand too (not just AI guesses), so the "old" label needs to reflect whichever it actually is.
+function coordsSourceLabel(source){
+  return { ai: 'AI guess', osm: 'OpenStreetMap', user: 'manually entered' }[source] || 'previous';
+}
+
+// Straight dashed line + colored endpoints (gray=old, teal=new) — Leaflet has no built-in
+// arrowhead marker, this is the simplest honest approximation of "show an arrow between them".
+function showCoordsCompareOnMap(place, found){
+  clearCoordsCompareOverlay();
+  const pts = [];
+  if(place.coords){
+    coordsOldMarker = L.circleMarker([place.coords.lat, place.coords.lng], { radius: 8, color: '#9aa0a6', fillColor: '#c7ccd1', fillOpacity: 0.9, weight: 2 })
+      .addTo(leafletMap).bindTooltip(`Old (${coordsSourceLabel(place.coordsSource)})`, { permanent: true, direction: 'top' });
+    pts.push([place.coords.lat, place.coords.lng]);
+  }
+  if(found){
+    coordsNewMarker = L.circleMarker([found.lat, found.lng], { radius: 8, color: '#2C6E82', fillColor: '#2C6E82', fillOpacity: 0.9, weight: 2 })
+      .addTo(leafletMap).bindTooltip('New (OSM)', { permanent: true, direction: 'top' });
+    pts.push([found.lat, found.lng]);
+  }
+  if(place.coords && found){
+    coordsLine = L.polyline(pts, { color: '#C1362B', weight: 3, dashArray: '6,6' }).addTo(leafletMap);
+  }
+  if(pts.length === 1) leafletMap.setView(pts[0], 15);
+  else if(pts.length === 2) leafletMap.fitBounds(pts, { padding: [60, 60] });
+}
+
+function coordsFixerStatusLine(){
+  if(coordsBackgroundDone) return '';
+  const pct = coordsPendingTotal ? Math.round((coordsCheckedCount / coordsPendingTotal) * 100) : 0;
+  return `<p class="hint" style="margin-top:8px;">Checked ${coordsCheckedCount}/${coordsPendingTotal} (${pct}%) — still checking in the background…</p>`;
+}
+
+// Only ever called with found!=null — items with no OSM match are auto-skipped in
+// showNextCoordsReviewItem() below, since there's nothing to decide for those.
+function renderCoordsFixerCard(item){
+  document.getElementById('places-split').classList.remove('mode-list');
+  const { place, found } = item;
+  showCoordsCompareOnMap(place, found);
+  const card = document.getElementById('coords-fixer-card');
+  card.classList.remove('hidden');
+  const oldMapLink = place.coords ? ` <a class="place-link" href="${mapLink(`${place.coords.lat},${place.coords.lng}`)}" target="_blank">View old on map ↗</a>` : '';
+  const newMapLink = ` <a class="place-link" href="${mapLink(`${found.lat},${found.lng}`)}" target="_blank">View new on map ↗</a>`;
+  card.innerHTML = `<div class="card" style="border-color:var(--harbor);">
+    <div class="place-name">${place.name}</div>
+    <p class="place-meta">${place.coords ? `Old: ${place.coords.lat.toFixed(4)}, ${place.coords.lng.toFixed(4)} (${coordsSourceLabel(place.coordsSource)})` : 'No previous coordinates.'}${oldMapLink}</p>
+    <p class="place-meta">New: ${found.lat.toFixed(4)}, ${found.lng.toFixed(4)} — ${found.displayName}${newMapLink}</p>
+    ${coordsFixerStatusLine()}
+    <div class="modal-actions" style="margin-top:10px;">
+      <button class="btn-cancel" id="coords-fixer-stop">Stop</button>
+      <button class="btn-small" id="coords-fixer-skip">Skip</button>
+      <button class="btn-save" id="coords-fixer-accept">Use new location</button>
+    </div>
+  </div>`;
+  document.getElementById('coords-fixer-skip').addEventListener('click', advanceCoordsFixer);
+  document.getElementById('coords-fixer-accept').addEventListener('click', async ()=>{
+    await writeConfirmedCoords(item.place, item.found);
+    advanceCoordsFixer();
+  });
+  document.getElementById('coords-fixer-stop').addEventListener('click', stopCoordsFixer);
+}
+
+function renderCoordsFixerWaiting(){
+  const card = document.getElementById('coords-fixer-card');
+  card.classList.remove('hidden');
+  card.innerHTML = `<div class="card"><p class="place-meta">Checking next place…</p>
+    ${coordsFixerStatusLine()}
+    <div class="modal-actions"><button class="btn-cancel" id="coords-fixer-stop">Stop</button></div></div>`;
+  document.getElementById('coords-fixer-stop').addEventListener('click', stopCoordsFixer);
+}
+
+function showNextCoordsReviewItem(){
+  // Nothing to decide when OSM found nothing — skip silently, just remember the name for the
+  // end-of-run summary, rather than interrupting the flow with a card that's only a "Next" button.
+  while(coordsShownCount < coordsReviewQueue.length && coordsReviewQueue[coordsShownCount].found === null){
+    coordsNotFoundNames.push(coordsReviewQueue[coordsShownCount].place.name);
+    coordsShownCount++;
+  }
+  if(coordsShownCount < coordsReviewQueue.length){
+    coordsWaitingForNext = false;
+    renderCoordsFixerCard(coordsReviewQueue[coordsShownCount]);
+  }else if(coordsBackgroundDone){
+    finishCoordsFixer();
+  }else{
+    coordsWaitingForNext = true;
+    renderCoordsFixerWaiting();
+  }
+}
+
+function advanceCoordsFixer(){
+  clearCoordsCompareOverlay();
+  coordsShownCount++;
+  showNextCoordsReviewItem();
+}
+
+async function writeConfirmedCoords(place, found){
+  const currentIdx = tripData.places.findIndex(p => place.id ? p.id === place.id : p.name === place.name);
+  if(currentIdx === -1) return; // place no longer exists (deleted mid-session)
+  const places = tripData.places.slice();
+  places[currentIdx] = { ...places[currentIdx], coords: { lat: found.lat, lng: found.lng }, coordsSource: 'osm' };
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  tripData.places = places;
+  renderPlaces();
+}
+
+function stopCoordsFixer(){
+  coordsFixerActive = false;
+  clearCoordsCompareOverlay();
+  document.getElementById('coords-fixer-card').classList.add('hidden');
+  renderMap();
+}
+
+function finishCoordsFixer(){
+  coordsFixerActive = false;
+  clearCoordsCompareOverlay();
+  const card = document.getElementById('coords-fixer-card');
+  const notFoundLine = coordsNotFoundNames.length
+    ? `<p class="place-meta">Not found on OpenStreetMap, left as-is: ${coordsNotFoundNames.join(', ')}</p>`
+    : '';
+  const autoLine = coordsAutoConfirmedNames.length
+    ? `<p class="place-meta">Already accurate (within ${COORDS_AUTO_CONFIRM_THRESHOLD_M}m), auto-confirmed: ${coordsAutoConfirmedNames.join(', ')}</p>`
+    : '';
+  const firstSetLine = coordsFirstSetNames.length
+    ? `<p class="place-meta">Had no previous location, set from OpenStreetMap automatically: ${coordsFirstSetNames.join(', ')}</p>`
+    : '';
+  card.innerHTML = `<div class="card"><p class="place-meta">All done checking coordinates.</p>${autoLine}${firstSetLine}${notFoundLine}
+    <div class="modal-actions"><button class="btn-save" id="coords-fixer-close">Close</button></div></div>`;
+  document.getElementById('coords-fixer-close').addEventListener('click', ()=>card.classList.add('hidden'));
+  renderMap();
+}
+
+// explicitPlaces, when given, bypasses coordsNeedsCheck entirely — used by the per-place "Check
+// coordinates" action, which re-checks a single place regardless of its current coordsSource
+// (e.g. the user renamed it to a different branch of the same restaurant and wants fresh coords).
+async function startCoordsFixer(explicitPlaces){
+  // Without this guard, clicking the button again mid-run (each place takes ~1.1s+ network
+  // latency, so a run easily takes tens of seconds) starts a second concurrent loop that stomps
+  // on the same shared queue/counters as the first — surfaced as places getting "checked" over
+  // and over without their coordsSource ever actually landing.
+  if(coordsFixerActive){
+    alert('Still checking coordinates — wait for it to finish, or click Stop first.');
+    return;
+  }
+  const pending = explicitPlaces
+    ? explicitPlaces.map(p=>({p}))
+    : (tripData?.places||[]).map((p,idx)=>({p,idx})).filter(({p})=>coordsNeedsCheck(p));
+  if(!pending.length){
+    alert('Every place already has a verified location — nothing to check.');
+    return;
+  }
+  coordsFixerActive = true;
+  coordsReviewQueue = [];
+  coordsShownCount = 0;
+  coordsPendingTotal = pending.length;
+  coordsBackgroundDone = false;
+  coordsNotFoundNames = [];
+  coordsAutoConfirmedNames = [];
+  coordsFirstSetNames = [];
+  coordsCheckedCount = 0;
+  document.getElementById('places-split').classList.remove('mode-list');
+  showNextCoordsReviewItem();
+
+  (async () => {
+    for(const { p } of pending){
+      if(!coordsFixerActive) return;
+      const found = await geocodePlace(p);
+      if(!coordsFixerActive) return;
+      const closeEnough = found && p.coords && haversineMeters(p.coords.lat, p.coords.lng, found.lat, found.lng) < COORDS_AUTO_CONFIRM_THRESHOLD_M;
+      // No prior coords means there's nothing to weigh a decision against — OSM's result is
+      // strictly better than nothing, so just take it instead of asking yes/no over one option.
+      const noPriorCoords = found && !p.coords;
+      let autoConfirmed = false;
+      if(closeEnough || noPriorCoords){
+        try{
+          await writeConfirmedCoords(p, found);
+          if(closeEnough) coordsAutoConfirmedNames.push(p.name);
+          else coordsFirstSetNames.push(p.name);
+          autoConfirmed = true;
+        }catch(err){
+          console.warn('Auto-confirm write failed for', p.name, '— falling back to manual review.', err);
+        }
+      }
+      if(!autoConfirmed){
+        coordsReviewQueue.push({ place: p, found });
+      }
+      coordsCheckedCount++;
+      if(coordsWaitingForNext) showNextCoordsReviewItem();
+      await new Promise(r=>setTimeout(r, 1100));
+    }
+    coordsBackgroundDone = true;
+    if(coordsWaitingForNext) showNextCoordsReviewItem();
+  })();
+}
+document.getElementById('btn-check-coords').addEventListener('click', startCoordsFixer);
 </script>
 </body>
 </html>
