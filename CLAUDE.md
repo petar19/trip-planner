@@ -61,6 +61,12 @@ Writing to `config/allowlist` itself is restricted to whoever is in its `admins`
 the same way) — only the admin can grow the whitelist, and the app can show an "invite" UI only
 to that account (frontend check, backed by the matching rule).
 
+**Being allowlisted only means "can sign in" — it doesn't mean "can see every trip."** A second,
+narrower layer sits on top: each `trips/{tripId}` doc's own `participants` array, enforced in rules
+for `trips`/`tripData`/`tripNotes` alike (see "Multi-user sharing" below for the full mechanics).
+This was implemented after the fact and closed a real gap — the rules originally only checked
+`isAllowed()`, so any allowlisted user could read/write *every* trip regardless of membership.
+
 **`firebaseConfig` (apiKey, projectId, etc.) is intentionally public** — it identifies the
 project, it does not grant access. Fine to commit to a public repo. Never do this with a Firebase
 **service account key** or an **AI provider API key** — those are real secrets (see "AI generation
@@ -187,45 +193,51 @@ tripData/{tripId}                  — trip content, fetched once per open, over
     routes: [   // Phase 4 — reusable location sequences, distinct from days
       {
         id, city, label,
-        stops: [   // discriminated by type — a stop is either a place to visit or a break.
-                   // placeId can be the cat:["base"] place itself — expected as the first and
-                   // last entry when the trip has a base of operations set (see "Routing /
-                   // planning" below); older routes may not have it, handled defensively there.
+        stops: [   // NEW shape (post-interstop-unification, see "Routing / planning" below) —
+                   // places only, no more break-as-stop. placeId can be the cat:["base"] place
+                   // itself — expected as the first and last entry when the trip has a base of
+                   // operations set; older routes may not have it, handled defensively there.
           {
             type: "place", placeId,
             note,       // planning note for THIS stop in THIS route specifically — deliberately
                         // separate from the place's own general `note` and from
                         // tripNotes.places[id].note (the Places-tab plan note), since the same
-                        // place can appear in two routes with different context each time. Meant
-                        // to surface in Phase 5 day-to-day execution once that's built; for now
-                        // it's just stored.
-            stayDuration,  // number of minutes, approximate — AI-suggested (asked for explicitly
+                        // place can appear in two routes with different context each time.
+                        // Surfaced in the Day-by-day execution view (Level 3).
+            stayDuration  // number of minutes, approximate — AI-suggested (asked for explicitly
                         // in the generation prompt) or hand-entered, editable in the route editor
-                        // either way. null if unknown. Display: formatStayDuration() (hour-aware,
-                        // e.g. "2h 15m" — stays run longer than travel legs so plain minutes read
-                        // worse here than for travel.time).
-            travel: [   // one or more alternative ways to reach the NEXT stop
-              { type, distance, time, cost, details }
-              // type: one of TRAVEL_LEG_TYPES (walk/metro/bus/train/taxi/ferry/car/bike) or a
-              // free-text custom value picked via a "Custom…" option in the editor
-              // distance: number of meters or null (display converts to km above 500m)
-              // time: number of minutes or null
-              // cost: plain number or null, always assumed to be in meta.defaultCurrency — no
-              // per-leg currency field
-              // details: free text, e.g. line numbers/platform — not meaningfully typeable
-              // Routes saved before this became numeric may still have free-text strings here
-              // (e.g. "600m") — shown as-is, never parsed/reformatted
-            ]
-          },
-          {
-            type: "break",
-            note,       // what the break is, e.g. "Lunch at a café"
-            duration,   // number of minutes or null — not a clock time, routes aren't tied to real
-                        // schedules until Phase 5. Was free text originally; made numeric together
-                        // with stops[].stayDuration so route total time (see below) can sum both
-                        // consistently — same formatMinutes() display as stayDuration/travel.time
-            travel: []  // a break is still a point you travel away from — same shape as above
+                        // either way. null if unknown. Display: formatMinutes() (hour-aware,
+                        // e.g. "2h 15m").
           }
+        ],
+        interstops: [   // array with stops.length-1 entries — interstops[i] describes everything
+                        // between stops[i] and stops[i+1]. Each entry is an OBJECT wrapping a list
+                        // of ZERO OR MORE items — { items: [...] } — NOT a bare array; Firestore
+                        // rejects "Nested arrays are not supported" for an array directly inside
+                        // another array, and interstops is itself an array, so each gap's list has
+                        // to be wrapped in a map value instead. This bit the very first real save
+                        // after the interstop model shipped (every manual-editor save and every AI
+                        // import failed with that exact error) — unwrapInterstopGap()/
+                        // normalizeRoute() (index.html) are the only code that has to know about
+                        // the wrapper; everything else works with plain arrays via normalizeRoute().
+                        // items: [] means the two stops need no travel note at all (e.g. two shops
+                        // right next to each other in the same building), more than one item means
+                        // the leg genuinely has multiple parts (e.g. a short walk then a break, or a
+                        // bus then a walk). Replaces the older model where a break was its own
+                        // interleaved stop and each stop carried at most one travel[0] leg — that
+                        // conflated "a thing you visit" with "a thing between two visits" and
+                        // couldn't express zero-travel adjacency or a multi-part gap. Each item:
+          { type, time, distance, cost, note }
+          // type: "break" or one of TRAVEL_LEG_TYPES (walk/metro/bus/train/taxi/ferry/car/bike) or
+          // a free-text custom value picked via a "Custom…" option in the editor
+          // time: number of minutes or null
+          // distance: number of meters or null — only meaningful for non-break types, stored 0 for
+          // a break (never hidden as a separate field)
+          // cost: plain number or null, always assumed to be in meta.defaultCurrency — no per-item
+          // currency field; null means "free"/unknown, never a bare 0
+          // note: free text, e.g. "lunch at a café" for a break or a platform/line number for
+          // transit — kept as one field for both cases rather than splitting break-note vs.
+          // travel-details, since the two never coexist on the same item
         ],
         totalWantRating,   // always computed by summing referenced places' wantRating, never
                            // trusted from AI output or hand-entered directly
@@ -235,9 +247,17 @@ tripData/{tripId}                  — trip content, fetched once per open, over
                            // without clearing source.ai (see places[].source above)
       }
     ],
-    // Stops saved by the very first version of AI route generation (before the type field
-    // existed) only ever have {placeId, travel} — read defensively everywhere:
-    // stop.type || (stop.placeId ? "place" : "break"). No migration needed.
+    // Routes saved before the interstop unification store the OLD shape instead: stops[]
+    // interleaves place/break entries (a break is its own stop with no placeId, discriminated by
+    // `type`) and each stop carries at most one `travel[0]` leg describing the trip to the next
+    // stop — `{ type, distance, time, cost, details }`, same field meanings as an interstop item
+    // above (details ~= note). Not migrated — normalizeRoute(route) is the one place that
+    // understands both shapes and reconstructs the equivalent {places, interstops} view on the
+    // fly; every renderer and the editor read a route through it rather than touching
+    // stops/interstops directly. Saving through the editor always writes the new shape, so an old
+    // route only "upgrades" once someone actually edits and saves it. Stops from the very first
+    // version of AI route generation (before even the `type` field existed) only ever have
+    // {placeId, travel} — read defensively via stop.type || (stop.placeId ? "place" : "break").
     days: [
       { label, date, city, assignedRoutes: [ routeId, ... ] }
       // Auto-synced to meta.startDate/endDate (syncDaysToTripDates()), not manually managed —
@@ -267,9 +287,19 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
                 // which is a planning/catalog view, not a "have we done this" tracker
         note,   // general planning note (e.g. "book ahead"), editable from the Places tab
         linkedDocs: [ docId, ... ],
-        ratings: { [uid]: { value, note } }   // per-person rating+note, Phase 5 — keyed by Firebase
+        ratings: { [uid]: { value, note } },  // per-person rating+note, Phase 5 — keyed by Firebase
                                                // uid, entered during execution mode, distinct from
-                                               // the plan-time `note` above
+                                               // the plan-time `note` above. Still unbuilt — place-
+                                               // level, route-independent, separate concept from
+                                               // routeStops[key].ratings below (which IS built).
+        wishlistChecked: { [wishlistIndex]: boolean }
+                // Day-by-day Level 3 only — lets a place's wishlist (places[].wishlist) act as a
+                // checklist of mini-goals ("try the rye bread", "see the old oven") rather than
+                // just a read-only list. Keyed by array index into that place's wishlist, not the
+                // item text itself — simplest possible key, at the cost of drifting if the wishlist
+                // is later reordered/edited; judged an acceptable tradeoff since that's rare.
+                // Shared across all participants and all routes that visit this place (a place's
+                // wishlist doesn't belong to any one route), same as `note` above.
       }
     },
     routeStops: {
@@ -277,14 +307,32 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
       // have no placeId at all, and a place can legitimately appear twice in one route, so
       // position is the only thing that's always unambiguous.
       [`${routeId}:${stopIndex}`]: {
-        done,     // shared boolean, any participant can toggle, last-write-wins
-        note,     // shared execution-time note — distinct from the route editor's per-stop
-                  // planning note (stops[].note) and from each rating's own note below
+        done,     // shared boolean, any participant can toggle, last-write-wins. NOT a manual
+                  // checkbox in the UI — auto-set true by the app the moment this stop's `ratings`
+                  // entry (below) gets a value, non-empty note, or a spent amount, on the theory
+                  // that any of those is itself strong evidence you did it. Only ever set to true,
+                  // never back to false, so clearing a review can't silently un-mark a stop someone
+                  // already confirmed. `note` (a separate shared execution-time note) was dropped
+                  // entirely — see ratings[uid].note below.
         ratings: {
-          [uid]: { value, note, email }
-          // value: 1-10, same scale as places[].wantRating. note: that person's own note.
-          // email: denormalized at write time — there's no uid→email lookup for anyone but
-          // currentUser, so without this there'd be no way to label whose rating is whose
+          [uid]: { value, note, spent, email }
+          // value: 1-5 (stars) — a DIFFERENT scale from places[].wantRating's 1-10, deliberately:
+          // wantRating answers "how much do I want to go", this answers "how was it", and forcing
+          // them onto the same scale would conflate two different questions. Rendered as a
+          // full-width row of 5 tappable stars (mobile-first), not a number input. A compact
+          // per-person star string (`stopRatingSummaryHtml()`) also shows in the Day-by-day Level 2
+          // list next to each stop, so a rating is visible without drilling into Level 3.
+          // note: this person's own review — the ONE place to write text about a visited stop.
+          // Used to be two separate fields (this personal one, plus a shared non-personal `note`
+          // on the routeStops entry itself) that read as duplicates with no clear reason to pick
+          // one over the other; the shared field was removed and this one relabeled "review" in
+          // the UI. spent: plain number or null, assumed to be in meta.defaultCurrency (no
+          // per-entry currency field, same convention as interstop item cost) — logged per-person
+          // since whoever fills in the review is generally who'd know/paid the amount; the Budget
+          // tab (still just a stub, see "Current status") is what will actually aggregate this
+          // across stops — this is just where the raw number is captured for now. email: denormalized
+          // at write time — there's no uid→email lookup for anyone but currentUser, so without
+          // this there'd be no way to label whose rating (or spend) is whose
         }
       }
     },  // Day-by-day tab execution state (Phase 5) — see "Day-by-day" below
@@ -465,22 +513,56 @@ end at the base" needed more than saying it once — the instruction states it a
 naming the base's exact `id` and requiring it as `stops[0]` and the last entry — repetition being
 one of the few practical levers against an LLM quietly dropping a single buried instruction in a
 longer prompt, not a hard guarantee. The AI supplies `label`, an ordered `stops` array (each
-`{placeId, stayDuration, travel[]}}` — `stayDuration` an approximate-minutes guess the AI is
-explicitly asked for, `travel[]` optional distance/time/cost/details, not computed against a real
-routing API); everything else (`id`, `city`, `generatedBy:"ai"`, `totalWantRating`) is set by the
-app itself, never trusted from the AI's output — `totalWantRating` in particular is computed by
-summing the referenced places' `wantRating` (the base contributes 0, having none), since letting
-the AI self-report an aggregate invites drift. Validation hard-rejects (blocks the whole import,
-same as place-generation) any route whose `stops[].placeId` doesn't exactly match one of the
-eligible places' ids *or* the base's id; every validated stop is tagged `type:"place"` (AI
-generation stays places-only — breaks are a manual-editor-only concept, see below). The list view
-groups routes by city; each card shows the route label, a provenance tag ("✨ AI-generated" or
-"✎ Manual", plus " (edited)" once `edited` is true), total want rating, and the stop sequence as
-`Start: <base> → stop (stay) → stop → ... → End: <base>` — `Start:`/`End:` label whichever stop
-actually *is* the base (`isBaseStop()`) rather than being separately injected, falling back to the
-old computed-bookend behavior only when the base genuinely isn't one of the stops — with per-leg
-travel info and stay duration shown inline where supplied, break stops rendered as
-`☕ Break (duration) — note`, and each place stop linking out via the existing `mapLink()` helper.
+`{placeId, stayDuration}` — `stayDuration` an approximate-minutes guess the AI is explicitly asked
+for) *plus* a separate `interstops` array (see schema above) — the instruction explains the
+zero-or-more-items-per-gap model explicitly and tells the AI to leave a gap's array empty when two
+stops need no travel note (rather than forcing exactly one leg per gap the way the old schema did),
+and to use more than one item when a leg genuinely has multiple parts (a short walk then a break, a
+bus then a walk); none of it is computed against a real routing API. The AI is shown and outputs the
+simple bare-array shape (`interstops[i]` = a plain array of items) — `validateRoutesResponse()` is
+what wraps each gap into the Firestore-safe `{ items: [...] }` object on ingest (see schema above),
+so the AI-facing contract stays simple and doesn't need to know about a storage-only detail.
+Everything else (`id`, `city`, `generatedBy:"ai"`, `totalWantRating`) is set by the app itself,
+never trusted from the AI's output — `totalWantRating` in particular is computed by summing the
+referenced places' `wantRating` (the base contributes 0, having none), since letting the AI
+self-report an aggregate invites drift. Validation hard-rejects (blocks the whole import, same as
+place-generation) any route whose `stops[].placeId` doesn't exactly match one of the eligible
+places' ids *or* the base's id; a missing/malformed `interstops` gap is instead handled leniently —
+it just becomes an empty array rather than failing the whole route, since missing travel notes
+shouldn't block an otherwise-valid import. The list view groups routes by city; each card shows the
+route label, a provenance tag
+("✨ AI-generated" or "✎ Manual", plus " (edited)" once `edited` is true), total want rating, and
+the stop sequence via `routeStopSequenceLine()` — one stop per line (small thumbnail via
+`routeStopThumbHtml()` when the place has one, name, stay duration), with each gap's interstop
+item(s) rendered as their own indented, muted line beneath (`.route-gap-line`) rather than joined
+into one paragraph. Joining everything into a single `→`-separated string used to read as unbroken
+text once a route had more than a couple of stops with travel info — this was the actual
+readability complaint that prompted the rewrite. `Start:`/`End:` label whichever stop actually *is*
+the base (`isBaseStop()`) rather than being separately injected, falling back to the old
+computed-bookend behavior only when the base genuinely isn't one of the stops, and each place stop
+links out via the existing `mapLink()` helper. The AI-preview checklist (`renderRoutesPreview()`)
+reuses the exact same `routeStopSequenceLine()` call — it used to just join stop names with `→` and
+had the identical readability problem, one level removed since it wraps in a `<label>` for the
+checkbox; a thumbnail click there calls `preventDefault()` before opening the lightbox so it
+doesn't also toggle the checkbox.
+
+✅ **Editing a candidate route before import**: each preview row has an "Edit" button (a real
+`<button>`, so — same label-click-forwarding exclusion relied on elsewhere — clicking it doesn't
+also toggle the row's checkbox) that opens the *same* manual route editor in a third mode,
+`openRouteEditor(idx, 'preview')`, pre-filled from `routesPreviewList[idx]` exactly like editing an
+already-saved route is pre-filled from `tripData.routes[idx]`. The save handler branches on this
+mode: instead of writing to Firestore, it writes the edited result straight back into
+`routesPreviewList[idx]` (setting `edited:true`, same as any other save) and calls
+`renderRoutesPreview()` to refresh the still-open preview screen — `#routes-modal` is never closed
+while the editor is open on top of it, so the two stack (the editor's later DOM position naturally
+paints it above the preview at the same z-index) and the user lands back on the preview to keep
+comparing or editing other candidates. The preview's own "Import selected" stays the actual commit
+step, unchanged. **Checked state now survives re-render**: `renderRoutesPreview()` used to hardcode
+every checkbox to `checked`, which was fine when it only ever ran once right after validation, but
+re-rendering after an edit would have silently re-checked anything the user had already unchecked —
+fixed by tracking checked indices in a separate `routesPreviewChecked` `Set` that the render reads
+from and a `change` listener keeps in sync, reset to "all checked" only when a fresh validation
+produces a new `routesPreviewList`.
 
 ✅ **Manual route editor** (`#route-editor-modal`, opened by "+ Add route manually" or by "Edit" on
 any existing route card — same dialog either way, AI-generated or manual; wide layout, 1140px, so
@@ -492,16 +574,25 @@ search-and-add places (scoped to the selected city, base included as a normal ad
 that it's a real stop; the search box shows every place in that city on focus even with an empty
 query, "in case you forgot the exact name," matching the same space-separated-keywords/AND/
 case-insensitive matching as the Places tab search via a shared `placeMatchesKeywords()` helper;
-each result shows its category, want rating, and a "Map ↗" link), "+ Add break" for a time/note
-break item, per-stop planning note and an editable approximate stay duration (minutes) for place
-stops, a travel-to-next-stop row between each pair of stops, up/down buttons to reorder (not
-drag-and-drop — simpler and reliable on touch) and a remove button per stop. A live map on the right
-shows the
-draft route's numbered stops (see below) and updates on every structural change (add/remove/
-reorder) — no separate refresh step. Opening the editor collapses any currently-expanded route card
-first, since the editor's own map replaces the need for that one to stay open (also avoids two live
-Leaflet instances of the same route disagreeing with each other). No validation beyond requiring a
-label — unlike the AI paste-back path this is direct hand-editing, not untrusted external input, so
+results are sorted by a **weighted proximity+variety score** against the last stop already in the
+route (`scoreRouteSearchCandidate()`) — see below — each result shows its category, want rating,
+distance from the last stop when scored, and a "Map ↗" link), a full-size thumbnail
+(`routeStopThumbHtml()` — routes aren't responsible for triggering the Wikipedia photo fetch, the
+Places tab already owns that, but a place with no thumbnail yet still gets a same-size blank box
+(`.place-thumb-blank`) rather than nothing at all, so stop rows stay aligned in a list where only
+some places have a photo — an actual gap here, not a blank space, was the original behavior and it
+misaligned every text line next to a photo-less row) next to each stop card's name, per-stop
+planning note and an editable approximate stay
+duration (minutes) for each place, up/down buttons to reorder (not drag-and-drop — simpler and
+reliable on touch) and a remove button per stop. Editing state mirrors
+the normalized `{places, interstops}` view directly (`routeEditorPlaces`/`routeEditorInterstops`,
+populated via `normalizeRoute()` when opening an existing route) rather than the old flat
+stops-with-interleaved-breaks array. A live map on the right shows the draft route's numbered
+place stops (see below) and updates on every structural change (add/remove/reorder) — no separate
+refresh step. Opening the editor collapses any currently-expanded route card first, since the
+editor's own map replaces the need for that one to stay open (also avoids two live Leaflet
+instances of the same route disagreeing with each other). No validation beyond requiring a label —
+unlike the AI paste-back path this is direct hand-editing, not untrusted external input, so
 there's nothing to reject. Saving always sets `edited:true` and recomputes `totalWantRating`;
 `generatedBy` is set to `"manual"` for brand-new routes and left untouched when editing an
 AI-generated one — editing doesn't erase where a route came from. This dialog is the intended
@@ -509,47 +600,142 @@ eventual home for an in-app clustering algorithm too (the "generate roughly N ro
 below) — not built yet, v1 still has none, but the editor was built so a future "auto-arrange"
 action has somewhere to live without restructuring the UI.
 
+✅ **Weighted proximity+variety sort** for the add-place search: raw distance sort put a
+same-category place right next door ahead of a more useful, more varied option a little further
+away (e.g. a second restaurant 10m from the last stop beating a landmark 60m away) — bucketing and
+penalizing fixes that without ignoring distance outright. `scoreRouteSearchCandidate()`: distance to
+the *last place already in the route* (haversine, `haversineMeters()` — reused from the coordinate
+fixer) is bucketed into a `band = floor(distance / ROUTE_SEARCH_BAND_SIZE_M)` (default 100m per
+band); a candidate sharing any `cat[]` tag with the last stop gets
+`+ROUTE_SEARCH_CATEGORY_PENALTY_BANDS` (2) added to its band, and a candidate already somewhere in
+the route gets `+ROUTE_SEARCH_ALREADY_ADDED_PENALTY_BANDS` (4) — deliberately larger than the
+category penalty, so an already-added place always sorts behind a same-category-but-not-yet-added
+one at comparable distance rather than the two penalties trading places depending on exact meters.
+Results sort by `(effectiveBand asc, sameCategory asc, alreadyInRoute asc, distance asc)` — ties
+within a band still favor variety and not-yet-added places before falling back to raw distance.
+With no stop in the route yet (or the last one lacks coordinates), there's no reference point to
+measure from, so results keep their original unsorted order exactly as before this — not "sorted by
+nothing," just nothing to sort by. Each scored result shows its distance from the last stop
+(`formatLegDistance()`) next to its category/want-rating; unscored results (first pick, or a
+candidate missing coordinates) show neither. Hand-verified in-browser before trusting it: last stop a restaurant, candidates a landmark at 60m,
+a restaurant at 10m, a landmark at 200m, and a park at 150m — expected and actual order is
+landmark(60m) → park(150m) → landmark(200m) → restaurant(10m), the very-close same-category option
+sorting last despite being nearest; and, at one shared band, an already-added candidate sorting
+behind both a same-category-not-added and a different-category-not-added candidate at similar
+distance.
+
+✅ **Advanced search dialog** (`#route-search-modal`, opened via a "🔍 Advanced search" button next
+to the inline search): a Places-tab-style split list+map for picking several places at once, with
+more context than the inline search's one-line-per-result affords. Each list row shows the same
+full place detail as Day-by-day (`placeDetailHtml()`, see "Day-by-day tab" below — thumbnail, want
+rating, badges, price/hours, categories, note, wishlist, and *every* link, not just Map) plus its
+distance from the route's last stop when one exists (same weighted sort as the inline search,
+factored into `orderedRouteSearchResults()` and shared by both). A category filter chip row
+(`renderRouteSearchCatFilter()`, same pattern as the Places tab's `renderCatFilter()`) narrows the
+list alongside the keyword search.
+
+**Revised from the first version of this dialog**: selection was originally a literal `<input
+type="checkbox">` in a `<label>` wrapping the row — replaced with the whole row being the click
+target (`.rs-place-row`, a plain `<div>` with a click handler, not a `<label>`) and a colored left
+border/background that matches the map pin colors (harbor-teal unpicked, moss-green picked)
+instead of a checkbox glyph, so the selection state reads as one visual language across the list
+and the map rather than a checkbox plus a separately-colored pin. `setRouteSearchCheck(placeId,
+checked)` stays the single source of truth either way — row class, marker color, and (see below)
+the map viewport all go through it, so a toggle from the row, a toggle from clicking the marker
+itself, and the underlying `routeSearchChecked` `Set` can never drift out of sync. The row-click
+handler bails out on `e.target.closest('a')` before toggling, so a link click opens normally
+without also (de)selecting the row; a thumbnail click still gets the `preventDefault()` +
+lightbox treatment used everywhere else, since an `<img>` isn't a labelable/interactive element and
+(now that the row itself carries the click handler, not a `<label>`) would otherwise register as a
+plain row click too.
+
+**The route's current last stop is pulled out of the regular candidate list** and shown separately
+instead — a small banner (thumbnail + name, `renderRouteSearchLastStopBanner()`) pinned above the
+list, and a third-colored map marker (`ROUTE_SEARCH_MARKER_COLOR_LAST_STOP`, mustard) distinct from
+the harbor/moss picked-state colors of every other marker — a fixed reference point for judging
+distance/direction while picking the *next* stop, not itself a thing you're picking from. Other
+already-in-route places stay in the regular list (just deprioritized by the weighted score, per the
+existing "revisiting a place is sometimes deliberate" reasoning) — only the literal last stop is
+special-cased out, since it's the one place already shown elsewhere on screen.
+
+**Checking a place now pans/zooms the map to it and brings its marker to front**
+(`marker.bringToFront()` + `map.setView(marker.getLatLng(), Math.max(currentZoom, 15))`, inside
+`setRouteSearchCheck()`, only on the checked-on transition) — with many candidates clustered close
+together, a newly-picked marker could otherwise end up hidden underneath its neighbors with no
+visual confirmation the click landed. Unchecking doesn't move the map, to avoid a jarring jump on
+every click.
+
+All three map/pin colors (`ROUTE_SEARCH_MARKER_COLOR_UNCHECKED`/`_CHECKED`/`_LAST_STOP`) are literal
+hex values, not `var(--harbor)`/`var(--moss)`/`var(--mustard)` — Leaflet sets `fillColor` as an SVG
+presentation attribute, which (unlike an inline `style` property) doesn't resolve CSS custom
+properties. `routeSearchChecked` (a `Set` of place ids) persists across search/category filter
+changes, so checking a place and then filtering it out of view doesn't lose the selection — "Add
+selected" re-reads every checked id directly off `tripData.places` (filtered to the route's city)
+rather than off whatever's currently rendered, in a stable city-array order rather than click/check
+order.
+
 Each route card shows a computed **total time** (`computeRouteTotalTime()`) at the top, above total
-want rating — the sum of every place stop's `stayDuration`, every break's `duration`, and every
-travel leg's `time` that's actually been entered. Shown as `~<formatMinutes result>` (the `~`
-because it's a lower bound, not a guaranteed-complete total — a stop or leg left blank just doesn't
-contribute); omitted entirely if nothing in the route has any duration/time entered at all.
+want rating — the sum of every place stop's `stayDuration` and every interstop item's `time` that's
+actually been entered. Shown as `~<formatMinutes result>` (the `~` because it's a lower bound, not
+a guaranteed-complete total — a stop or interstop item left blank just doesn't contribute); omitted
+entirely if nothing in the route has any duration/time entered at all.
 
-**Travel leg fields are now typed, not free text**: `type` is a preset picker (walk/metro/bus/
-train/taxi/ferry/car/bike, `TRAVEL_LEG_TYPES`) with a "Custom…" option revealing a free-text input
-for anything else; `distance` is a number of meters; `time` is a number of minutes; `cost` is a
-plain number, always assumed to be in the trip's `meta.defaultCurrency` (no per-leg currency
-field) — free text here was judged too bug-prone (inconsistent units, unparseable later). `details`
-stays free text (line numbers, platform info — not meaningfully typeable) and got its own full-width
-line in the editor instead of squeezing into the same row as the other four fields. The four typed
-fields render as two rows of two inside the editor (`.modal-grid`, reused for its built-in
-`label{margin-top:0}` rule) with a persistent `<label>` naming the field and its unit (e.g.
-"Distance (meters)") above each input — placeholders alone weren't enough, since a placeholder
-disappears the moment a value is typed, leaving bare numbers with no visible unit at a glance.
-Display
-formatting (`formatLegDistance`/`formatLegTime`/`formatLegCost`, used by both the compact card
-sequence and the expanded view) shows meters as-is under 500m and converts to km (1 decimal) above
-that, appends "min" to time, and appends the trip's currency to cost if one is set. Routes saved
-before this change have free-text strings in these fields (e.g. `"600m"`) — shown as-is rather than
-parsed, since regex-guessing units on old free text defeats the point of typing the field; the
-editor's numeric inputs simply won't prefill from a non-numeric legacy value. The AI generation
-instruction (`routesTravelSchemaDoc()`, now a function of the trip's currency rather than a static
-const) asks for the same numeric shape and preset vocabulary; `validateRoutesResponse()` coerces a
+**Breaks and travel legs are unified into one "interstop" concept, stored separately from stops**
+(see schema above) — each gap between two consecutive stops holds zero or more interstop items
+rather than a stop carrying at most one travel leg with a break as its own interleaved stop. In the
+editor, each gap between two place rows renders its own "+ Add travel or break" control (labeled in
+plain terms rather than the internal "interstop" name, which only means something to someone who's
+read this doc) and a card per existing item; a gap with no items renders with nothing between the
+two stop cards (the visual cue for "right next to each other, no travel note needed"). Each item has a type picker — "Break" or
+one of `TRAVEL_LEG_TYPES` (walk/metro/bus/train/taxi/ferry/car/bike) or a "Custom…" option revealing
+a free-text input — plus `time` (minutes) always shown, and `distance`/`cost` shown only when the
+type isn't "break" (`.interstop-dc-fields`, toggled live via a direct classList swap on the type
+select's `change` handler — no full re-render, so the rest of the gap's form state survives the
+toggle); switching to "break" resets `distance` to 0 and `cost` to null since neither is meaningful
+for one. `cost` is always assumed to be in the trip's `meta.defaultCurrency` (no per-item currency
+field) — free text here was judged too bug-prone (inconsistent units, unparseable later). `note`
+stays free text (a break's description, or line numbers/platform info for transit) and got its own
+full-width line. Display formatting (`formatLegDistance`/`formatLegTime`/`formatLegCost`/
+`formatInterstopItem`/`formatInterstopGap`) shows meters as-is under 500m and converts to km (1
+decimal) above that, appends "min" to time, and appends the trip's currency to cost if one is set;
+multiple items in one gap are joined with " · then · ". Routes saved before this change have
+free-text strings in the old per-stop `travel[]` shape (e.g. `"600m"`) — shown as-is rather than
+parsed (via `normalizeRoute()`'s legacy-shape reconstruction), since regex-guessing units on old
+free text defeats the point of typing the field. The AI generation instruction
+(`routesTravelSchemaDoc()`, a function of the trip's currency) asks for the same numeric shape,
+preset vocabulary, and zero-or-more-per-gap model; `validateRoutesResponse()` coerces a
 numeric-looking string to a number if the AI ignores the instruction, else falls back to `null`
-(never a bare 0, which would misrepresent "free"/unknown as an actual zero cost).
+(never a bare 0, which would misrepresent "free"/unknown as an actual zero cost), and defaults a
+missing/malformed gap to `[]` rather than rejecting the route.
 
-✅ **Expandable route view**: an "Expand ▾"/"Collapse ▴" button per route card reveals a
-Places-tab-style split list+map scoped to that one route (`.route-split` — same idea as
-`#places-split`, new CSS since there can be many route containers rather than one fixed ID). Each
-place stop's row also shows that place's categories and its own general `note` (labeled distinctly
-from the stop's route-specific note as "Note for this stop:" so the two don't read as the same
-thing) — this view specifically, since it's where there's room, and because an unfamiliar name
-(a Danish place name, say) is hard to place from the name alone without that context. Only
-one route expanded at a time — expanding a different one (or opening the route editor) tears down
+Reordering (`route-stop-up`/`route-stop-down`) and removing a stop in the editor clears the
+interstop data for every gap whose adjacency actually changed, rather than leaving stale
+distance/time/cost silently attached to a leg that no longer exists — up-swap of `places[i-1]`/
+`places[i]` clears gaps `[i-2,i-1,i]`; down-swap of `places[i]`/`places[i+1]` clears gaps
+`[i-1,i,i+1]`; removing the first place drops gap `0`; removing the last place drops the
+now-final gap; removing a middle place merges its two adjacent gaps into one empty gap
+(`interstops.splice(i-1, 2, [])`) rather than guessing which of the two survives. The field goes
+blank instead of showing a wrong number, prompting re-entry — recomputing a correct value
+automatically instead of just clearing it is still not built (see the deferred note below).
+
+✅ **Expandable route view**: an "Expand ▾"/"Collapse ▴" button per route card **replaces** that
+card's compact summary (total want rating, the stop-sequence line) with a Places-tab-style split
+list+map scoped to that one route (`.route-split` — same idea as `#places-split`, new CSS since
+there can be many route containers rather than one fixed ID), rather than showing both stacked on
+top of each other — an accordion, not an inline addition. The route label, provenance tag, total
+time, and Edit/Expand/Delete actions stay visible either way. Each place stop's row shows a
+full-size thumbnail (same `routeStopThumbHtml()` as the manual editor) alongside that place's
+categories, its own general `note` (labeled distinctly from the stop's route-specific note as "Note
+for this stop:" so the two don't read as the same thing), and a "Map ↗" link (`mapLink()`, same as
+the compact card's stop sequence and every other place-in-a-route view — expanding shouldn't lose a
+link the collapsed view already had) — this view specifically, since it's where there's room, and
+because an unfamiliar name (a Danish place name, say) is hard to place from the name alone without
+that context. Only one route expanded at a time — expanding a different one (or opening the route editor) tears down
 the previous route's Leaflet map instance first (`.remove()`), since each expansion creates its own
 `L.map()` bound to a per-route container id. The map shows numbered markers (`L.divIcon`, 1-based,
-visiting order) for place-stops that have coordinates — breaks and coordless places are skipped on
-the map but still listed — connected by a polyline. No arrowhead plugin: numbered markers plus a
+visiting order) for place-stops that have coordinates — coordless places are skipped on the map but
+still listed, and each gap's interstop item(s) render as their own line between the two stop rows —
+connected by a polyline. No arrowhead plugin: numbered markers plus a
 connecting line was chosen deliberately over adding a new Leaflet dependency, consistent with the
 coordinate-fixer's compare view already making the same "honest approximation over a plugin"
 tradeoff. Clicking a list row pans/zooms the map to its marker and opens its popup; clicking a
@@ -567,37 +753,47 @@ defined view (`setView([20,0],2)`) before adding markers, only creating/populati
 container is visible, and guarding the deferred fit-view callback with an "is this still the active
 map" check.
 
-✅ Assigning routes to days is implemented — see "Day-by-day tab" below (day-assignment chips live
-on each route card here, on the Routes tab).
+✅ Assigning routes to days is implemented — see "Day-by-day tab" below. **Revised from an earlier
+version of this doc**: this used to live here on the Routes tab as day-assignment chips on each
+route card; moved to the Day-by-day tab instead (a persistent "+ Add routes" checklist on Level 2)
+after actually using it — see the reasoning under "Day-by-day tab" below.
 
 ⬜ **Deliberately deferred**: real distance/time via OpenRouteService (numbers are still AI-suggested
 or hand-entered estimates, not computed against a routing API). A genuine in-app clustering
 algorithm remains a fair v2 once it's clear whether AI-generated routes are good enough in practice
 (the manual editor is where it would plug in).
 
-⬜ **Known limitation, deferred**: `travel[]` is stored on the "from" stop and describes the leg to
-whichever stop is next — it belongs to the *edge* between two stops, not to either stop itself.
-Reordering in the manual editor (`route-stop-up`/`route-stop-down`) now clears the travel data on
-every stop whose adjacency actually changed (`clearStopTravel()` — up to 3 stops around a swap: the
-one before it and the swapped pair; 1 stop on remove: the new predecessor of whatever follows), so
-a reorder can no longer leave *wrong* distance/time/cost silently attached to a leg that no longer
-exists — the field goes blank instead, prompting re-entry. What's still missing is *recomputing* a
-correct value automatically instead of just clearing it. Doing that well needs either the AI to
-work out every affected leg (expensive/slow for a paste-back workflow) or, once Tier 3 (direct
-in-app AI calls, see "AI generation model") exists, an on-demand per-edge recalculation triggered
-by each reorder with the result cached against the (fromPlaceId, toPlaceId) pair so the same
-requery isn't repeated. Not worth building before Tier 3 exists, and reordering isn't expected to
-be a frequent action in practice — flagged here rather than solved now.
+⬜ **Known limitation, deferred**: interstops now live on the actual *edge* between two stops
+(fixing the earlier "`travel[]` stored on the from-stop" ambiguity — see the schema note above), so
+a reorder/remove clears exactly the affected gap(s) rather than guessing (see the reorder/remove
+math above). What's still missing is *recomputing* a correct value automatically instead of just
+clearing it. Doing that well needs either the AI to work out every affected leg (expensive/slow for
+a paste-back workflow) or, once Tier 3 (direct in-app AI calls, see "AI generation model") exists,
+an on-demand per-edge recalculation triggered by each reorder with the result cached against the
+(fromPlaceId, toPlaceId) pair so the same requery isn't repeated. Not worth building before Tier 3
+exists, and reordering isn't expected to be a frequent action in practice — flagged here rather
+than solved now.
 
 ## Day-by-day tab (Phase 4 assignment + Phase 5 execution)
 
 **Resolved from an earlier version of this doc**: Phase 4 and Phase 5 were described separately
 without saying how they map onto the UI. They don't split into two tabs — the "Day-by-day" nav tab
-is specifically the *execution* surface (Phase 5: completion, ratings, notes), not a planning tool.
-**Assignment** (which day(s) a route belongs to) happens on the **Routes tab** instead — a route is
-already being evaluated there, so tagging it with a day is contextual; **ordering**, for a day with
-more than one route, happens on the Day-by-day tab, since that's the one place a day's full route
-list is visible together.
+covers both **assignment** (which day(s) a route belongs to, Phase 4) and *execution* (Phase 5:
+completion, ratings, notes).
+
+**Assignment moved here from the Routes tab, reversing an earlier version of this doc.** The
+original reasoning was that a route is already being evaluated on the Routes tab, so tagging it
+with a day there is contextual — but in practice the Routes tab doesn't have a day's full context
+(what else is already on that day, how full it is), and cluttered every route card with a full row
+of day chips regardless of whether you were thinking about assignment at all. Level 2 below now has
+a persistent "+ Add routes" button instead: a checklist modal (`#add-routes-modal`, mirrors the
+Copy-trip places-checklist pattern — `renderCopyPlacesChecklist()`/`renderAddRoutesChecklist()`) of
+every route not already on the selected day, grouped by city, with Select all/Select none; "Add
+selected" appends the checked route ids to that day's `assignedRoutes` (immediate write, no
+draft/save step) and closes. Only unassigned routes are listed, so there's nothing to dedup against
+— a route already on the day was never offered as a checkbox in the first place. **Ordering**, for
+a day with more than one route, still happens here too (up/down buttons on the Level 2 picker),
+since that's the one place a day's full route list is visible together — this part didn't change.
 
 ✅ **Implemented**, as a three-level drill-down rather than all days rendered at once (deliberately
 — there's no reason to load a whole trip's worth of checklists/maps when only one day matters at a
@@ -608,24 +804,68 @@ time):
   first day — always overridable, works for past/future days too.
 - **Level 2 — route overview**: empty state if the day has no assigned routes; loads directly if
   it has exactly one; a button-row picker (reusing the `.cat-chip` visual, `isRouteComplete()`
-  defaulting to the first not-fully-done route) if it has more. Reuses the Routes tab's expandable-
-  view machinery (`renderExpandedRouteHtml`/`initExpandedRouteMap`'s patterns, `.route-split`/
-  `.route-stop-row`, numbered markers + polyline) rather than rebuilding it, with two differences:
-  completed stops get a `.stop-done` modifier (moss background + ✓), and *every* stop row is
-  clickable into Level 3 — not just ones with coordinates, since marking something done doesn't
-  need a map marker. Map pane is `position:sticky` (`.day-route-map-pane`) since a day's stop list
-  can run long. The route picker's up/down buttons reorder `days[].assignedRoutes` directly
-  (immediate write, no draft/save step); "Remove" splices a route out of the day without deleting
-  the route itself.
-- **Level 3 — single-stop view**: opened by clicking a stop row. No map. Full stop detail (place
-  categories/description, the route's per-stop planning note, stay duration; or a break's
-  note/duration) plus the actual execution controls — a completion checkbox, "Your rating" (1-10 +
-  your own note, prefilled from `ratings[currentUser.uid]`), a read-only line for any other
-  participants' ratings (via the denormalized `email`), and a shared execution note. All fields
-  auto-save on `change` (same "no separate save step outside modals" convention as the rest of the
-  app) via `db.collection('tripNotes').doc(currentTripId).set({routeStops:{[key]:{...}}},
-  {merge:true})` — same merge-write pattern already used for `tripNotes.places[id].note`.
-  "← Back to route" returns to Level 2.
+  defaulting to the first not-fully-done route) if it has more — **one route per line**
+  (`.days-route-picker{flex-direction:column}`, a dedicated class rather than reusing `.cat-picker`,
+  whose `flex-wrap` laid these rows out side by side like category chips instead of a list). Reuses
+  the Routes tab's expandable-view machinery (`renderExpandedRouteHtml`/`initExpandedRouteMap`'s
+  patterns, `.route-split`/`.route-stop-row`, numbered markers + polyline) rather than rebuilding
+  it, with the differences: each stop row shows full Places-tab-level detail via the shared
+  `placeDetailHtml()` (thumbnail, want rating, badges, city/area/price/hours, categories, the
+  place's own note, wishlist, links — the same richness `renderPlaces()` shows, factored out so the
+  two don't duplicate markup), passing the route's per-stop planning note as `opts.routeNote` so it
+  renders directly beneath the place's own note (see note-differentiation below); completed stops
+  get a `.stop-done` modifier (moss background + ✓) plus a compact per-person star string
+  (`stopRatingSummaryHtml()`, `.mini-stars`) next to the checkmark for anyone who's rated that stop
+  — a rating is visible from the list without drilling into Level 3; and *every* stop row is
+  clickable into Level 3 — not just ones with coordinates, since marking something done doesn't need
+  a map marker (a click inside a link or button within the row is excluded from that, so opening a
+  place's link doesn't also navigate into Level 3). Price conversion for these rows uses a separate
+  `updateDayPriceConversions()` keyed by `data-place-id` rather than the Places tab's
+  `data-idx`-keyed `.price-convert` spans, so the two can't collide despite sharing a class name.
+  Map pane is `position:sticky` (`.day-route-map-pane`) since a day's stop list can run long. The
+  route picker's up/down buttons reorder `days[].assignedRoutes` directly (immediate write, no
+  draft/save step); "Remove" splices a route out of the day without deleting the route itself.
+- **Level 3 — single-stop view**: opened by clicking a stop row. No map. The same
+  `placeDetailHtml()` full detail as Level 2's rows (`opts.routeNote` again, plus
+  `opts.interactiveWishlist:true` — see below), stay duration, and, for any stop after the first, a
+  "Getting here:" line showing the interstop item(s) in the gap immediately before it
+  (`normalizeRoute(route).interstops[stopIdx-1]`) — so how to get to this stop is visible without
+  going back to Level 2. A Prev/Next nav bar cycles through the route's place-stops (interstop items
+  aren't navigable targets — navigation is stop-to-stop) with an "N / M" counter, disabled at either
+  end; navigating updates the "Getting here" line for the newly-shown stop the same way clicking a
+  row would.
+
+  **Execution controls, revised from the first version of this view**: a manual "Mark as done"
+  checkbox and two separate free-text fields (a shared "Note" plus a personal "rating note") have
+  been replaced with just rating + review. "Your rating" is five full-width, large-tap-target star
+  buttons (`starRatingHtml()`, `.star-rating`/`.star-btn`) — mobile-first, and deliberately a 1-5
+  scale, not 1-10: this answers "how was it" post-visit, a different question from
+  `places[].wantRating`'s 1-10 "how much do I want to go", so reusing that scale would have
+  conflated the two. "Your review" is one `<textarea>` (`#day-stop-review`) — the one place to write
+  text about a visited stop, replacing both of the old fields. A third field, "Amount spent here"
+  (`#day-stop-spent`, plain number, labeled with `meta.defaultCurrency` when set), captures
+  `ratings[uid].spent` — the raw number the future Budget tab will aggregate (see schema above).
+  `done` is no longer a checkbox at all: `saveDayStopRating()` sets it to `true` automatically the
+  moment a star is clicked, the review has non-empty text, or a spent amount is entered (never back
+  to `false` — clearing a review can't silently un-mark a stop), and a small read-only
+  "✓ Marked done" line shows when it's set. A star click writes and re-renders immediately (so the
+  filled-star count and the ✓ line update); editing the review text writes on `change` (blur)
+  without re-rendering, so a mid-sentence edit doesn't lose textarea focus/cursor position — same
+  tradeoff already used for other text-field autosaves in this app; the spent field does re-render
+  on `change` since it's a single blur-triggered number entry, not continuous typing. A read-only
+  line still lists any other participants' ratings (via the denormalized `email`), rendered as
+  filled-star characters rather than a raw number, plus their spent amount when they've logged one.
+  All writes go through
+  `db.collection('tripNotes').doc(currentTripId).set({routeStops:{[key]:{...}}}, {merge:true})` —
+  same merge-write pattern already used for `tripNotes.places[id].note`. "← Back to route" returns
+  to Level 2.
+
+  **Wishlist as a checklist**: when `opts.interactiveWishlist` is set (Level 3 only — Level 2 and
+  every other `placeDetailHtml()` caller still get the plain comma-joined summary), a place's
+  `wishlist` renders as one checkbox per item (`.wishlist-item`, `tripNotes.places[id].wishlistChecked`,
+  see schema above) instead of read-only text — "mini goals" for that specific place (which exhibit
+  to see, which dish to try), shared across every route/day that visits it, independent of any one
+  visit's rating/review.
 
 **Real bug found and fixed while building this**: `isoDatesInRange()` originally built each date
 with `new Date(iso+'T00:00:00').toISOString().slice(0,10)` — `toISOString()` converts to UTC,
@@ -634,11 +874,11 @@ still "yesterday" in UTC). Fixed to read back the date with the same local gette
 (`getFullYear`/`getMonth`/`getDate`) used to construct it, matching how `todayIso()` already did
 this correctly — never mix `toISOString()` with locally-constructed dates in this codebase.
 
-⬜ **Deliberately deferred**: reaching Level 3 is manual (tap the stop) — no auto-navigation into
-the next undone stop's detail, and no Next/Previous buttons within Level 3 to walk a route without
-returning to Level 2 each time. A real transition leg between two routes assigned to the same day
-is shown as a plain divider, not an editable/fillable gap. `tripData.places[placeId].done`/
-`ratings` (place-level, route-independent tracking, separate from `routeStops`) stays unbuilt.
+⬜ **Deliberately deferred**: reaching Level 3 the first time is still manual (tap a stop) — no
+auto-navigation into the next undone stop's detail on entry, only Prev/Next once already inside
+Level 3. A real transition leg between two routes assigned to the same day is shown as a plain
+divider, not an editable/fillable gap. `tripData.places[placeId].done`/`ratings` (place-level,
+route-independent tracking, separate from `routeStops`) stays unbuilt.
 
 ## Map + list view (Phase 6)
 
@@ -669,12 +909,51 @@ and maintaining a field list.
 
 ## Multi-user sharing (Phase 7)
 
-- A trip's `participants` array (emails) gates access to that specific trip document — separate
-  from, and narrower than, the global `config/allowlist` (allowlist = "can ever sign in and use
-  the app at all"; `participants` = "can see this particular trip"). Rules for `trips`/`tripData`/
-  `tripNotes` check membership in that trip's `participants`, not just global allowlist membership.
-- "Add collaborator" appends an email to `participants` — restricted to the trip's `ownerEmail`
-  to avoid uncontrolled invite chains, open question below on whether to loosen this.
+✅ **Access control, implemented**: a trip's `participants` array (emails) gates access to that
+specific trip document — separate from, and narrower than, the global `config/allowlist`
+(allowlist = "can ever sign in and use the app at all"; `participants` = "can see this particular
+trip"). **This was a real gap until this pass** — `firestore.rules` previously let any allowlisted
+user read/write *every* trip (no `participants` check anywhere), and `loadTripIndex()` queried
+`trips` with no filter, so every allowlisted user's picker showed every trip regardless of
+membership. Fixed on both sides: `loadTripIndex()` now queries with
+`.where('participants', 'array-contains', currentUser.email)`, and the rules require
+`request.auth.token.email in resource.data.participants` for `trips/{tripId}` read/update/delete
+(and the matching check on `request.resource.data.participants` for create). `tripData/{tripId}`
+and `tripNotes/{tripId}` don't store `participants` themselves, so their rules check via
+`isParticipant(tripId)`, a helper that does `get(/databases/$(database)/documents/trips/$(tripId))`
+— the same cross-document pattern already used for `config/allowlist`. The `trips` update rule also
+requires `ownerEmail` to stay unchanged and stay present in `participants` on every write, so a trip
+can never end up ownerless from an edit.
+**Operational note**: combining `array-contains` with `orderBy` on a different field requires a
+Firestore composite index — not automatic, and the very first real run of this query hits a
+`failed-precondition` error until one exists (Firestore's own error includes a direct
+"create it" console link; building takes a minute or two after clicking it). `loadTripIndex()`'s
+error handler used to only handle `permission-denied` explicitly and silently swallow everything
+else via a bare `console.error()` — a missing-index failure looked indistinguishable from "you have
+no trips," with nothing in the UI hinting why. Now surfaces a specific alert for
+`failed-precondition` (pointing at the console link) and a generic one for any other unexpected
+error, instead of failing invisibly.
+- ✅ **"Manage collaborators"** (Overview tab, next to Edit/Copy/Delete): any current participant
+  can invite (append an email to `participants` — resolves the open question below in favor of "any
+  participant," not owner-only, since once you're a participant you're already fully trusted with
+  the trip's actual content). Only `ownerEmail` can remove someone else; anyone can remove
+  themselves ("Leave"); the owner can neither be removed nor leave — no ownership-transfer UI for
+  v1, so an owner's only way out is deleting the trip. This "who can remove whom" nuance is
+  UI-only, not enforced in rules (see the `isParticipant()` comment in `firestore.rules`) — the
+  rules-layer boundary is coarser ("are you a participant at all"), matching the no-roles
+  "everyone's fully trusted once invited" model. The modal does a one-off
+  `db.collection('trips').doc(currentTripId).get()` for `ownerEmail`/`participants` rather than
+  keeping a persistent client-side trip index just for this. Inviting someone not yet on the global
+  `config/allowlist` shows a hint that they won't be able to sign in until an admin adds them too —
+  the two layers are independent, invited-but-not-allowlisted is a real, expected intermediate state.
+- ✅ **Admin: allowlist management** — a header "Admin" button, shown only once
+  `checkAdminStatus()` confirms `currentUser.email` is in `config/allowlist.admins` (a UX
+  convenience; the real gate is the existing `isAdmin()` rule restricting `config/allowlist` writes).
+  Opens a modal: per-email row with an "Admin" toggle checkbox and a Remove button, plus an
+  add-email form with an "also make admin" checkbox. Removing an email drops it from both `emails`
+  and `admins`. Guards against ever reaching zero admins (which would lock everyone out of this
+  panel with no way back short of hand-editing Firestore) — both the toggle-off and the Remove path
+  refuse the action if it's the last remaining admin.
 - "Duplicate trip" copies a trip's content into a new document owned solely by the duplicating
   user, severing the live connection — this is the "send someone my draft without inviting them
   to my live trip" case.
@@ -691,16 +970,113 @@ and maintaining a field list.
   — see "Coordinates" schema note above). Save creates fresh `trips`/`tripData`/`tripNotes` docs —
   owned solely by whoever clicked Copy (`ownerEmail`/`participants`, not inherited from the
   original); `tripNotes` starts empty, nothing carries over from the source trip's live state.
+  **Bug fixed**: routes were always dropped (hardcoded `routes: []` regardless of mode) even though
+  the checklist only ever applied to places — copy mode now deep-clones `tripData.routes` as-is. A
+  copied route can end up referencing a place the user left unchecked in the checklist; not
+  hard-filtered, since the existing renderers already handle a dangling `placeId` gracefully
+  ("(unknown place)"). `days[]` is deliberately still *not* copied — day entries are bound to the
+  *source* trip's calendar dates, meaningless for a copy with its own date range;
+  `syncDaysToTripDates()` regenerates them fresh once the copy's own dates are set, and the copied
+  routes are there to reassign once it does.
 
 ## Static/public sharing (Phase 7)
 
-"Publish" copies a filtered subset (places, routes/days, notes — **not** `tripNotes.documents`,
-since those may hold confirmation numbers) into `publicTrips/{tripId}`, an openly readable
-collection. The app checks the URL for a share parameter (`?share=tripId`) on load and, if
-present, skips sign-in and renders that trip read-only straight from the public collection.
-Un-publishing = deleting that one document; nothing else is exposed. Chosen over generating a
-downloadable static HTML file, since a live link is simpler UX than emailing a file of unknown
-rendering fidelity.
+✅ **Implemented.** "Publish / Share…" (Overview tab) writes a filtered, **point-in-time copy** of
+the trip to `publicTrips/{tripId}` — openly readable (`allow read: if true` in `firestore.rules`),
+so a link works for anyone, signed in or not, allowlisted or not. It is *not* a live mirror:
+editing the trip afterward doesn't change what the shared link shows until "Publish" is clicked
+again — chosen deliberately over making the real trip doc conditionally public, since Firestore
+rules gate access to a whole document, not individual fields, so there'd be no clean way to
+guarantee `tripNotes.documents` (confirmation numbers) never leaks through a "sometimes public"
+rule on the same collection that holds every private trip. A separate copy is the only way to make
+that guarantee airtight. Also chosen over generating a downloadable static HTML file — a live
+Firestore doc needs no hosting/regeneration story and no Storage/Blaze dependency, where a static
+export would need somewhere to live and would go stale exactly the same way, for more effort.
+
+The publish modal offers three content checkboxes — Places, Routes & Days, Ratings & reviews
+(default **off**). **Revised twice from the first version**: v1 was a plain `<label
+style="display:flex;...">` per row, which read as visually broken once actually used — labels and
+boxes didn't line up as a column. v2 tried fixing that inline but hit two real CSS specificity
+bugs at once: (1) the pre-existing `.modal-box input{width:100%}` rule stretched the unsized
+checkboxes into large boxes, since nothing explicitly sized them; (2) the pre-existing
+`.modal-box label{display:block}` rule (specificity 0,1,1) silently beat a bare `.publish-check-row
+{display:flex}` rule (0,1,0), so the row never actually became a flex row despite the CSS looking
+correct in isolation — found via `getComputedStyle()` showing `display:"block"` when the source
+said `flex`. Fixed for good with a dedicated `.publish-check-row` class, requalified as
+`.modal-box .publish-check-row{...}` (0,2,0) to win over the label rule, `justify-content:
+space-between` so every row's `<span>` label sits flush left and its checkbox sits flush right in
+one aligned column, and an explicit `width:18px; height:18px` on `.publish-check-row
+input[type="checkbox"]` to stop the stretch. Verified via `getBoundingClientRect()`: all checkbox
+right edges and all label left edges land on the same pixel across every row. **Revised from the
+first version**: the two preset buttons ("Share as template" / "Share full trip") were removed —
+with only three checkboxes, a preset shortcut added a layer of indirection without saving
+meaningful effort, and users found them confusing rather than helpful. Routes reference `placeId`s, so checking
+"Routes & Days" still force-checks and disables "Places" in the UI (`syncPublishPlacesLock()`)
+rather than silently including places behind the checkbox's back. `tripNotes.documents` is never
+written to the public copy under any combination — no checkbox controls it, it's simply never
+touched by the write, so there's nothing to leak regardless of what's clicked. Re-opening the modal
+on an already-published trip now reflects what's *actually* currently published (read back from the
+`publicTrips` doc) rather than always resetting to the defaults — editing your last choices instead
+of re-declaring them from scratch. A "Copy link" button next to the published URL uses
+`navigator.clipboard.writeText()` (same pattern as the AI-instruction copy button elsewhere), with a
+"Could not copy automatically" fallback alert if the browser blocks it. Un-publishing deletes the
+`publicTrips/{tripId}` doc; the source trip is completely untouched by either action.
+
+A fourth checkbox, **"Let viewers start their own trip from this"** (`allowCopy` on the published
+doc), is independent of the three content ones — it controls whether the *read-only viewer* gets a
+"Start my own trip from this" button, not what's included in the snapshot itself. This is what turns
+"share as template" from view-only into something a recipient can actually build on, addressing the
+three-modes distinction directly: **invite as collaborator** (existing "Manage collaborators" —
+same trip, full edit access) vs. **share as snapshot** (`allowCopy` off — view only) vs.
+**share as template** (`allowCopy` on — view, plus a one-click way to start their own independent
+copy). The button itself (`#share-start-own-trip`) originally carried `class="primary"`, which
+turned out to have zero effect outside `header.hero button.primary` — it rendered with no styling
+at all ("looks out of place... like it has no CSS"). Fixed with a dedicated `.share-cta-btn` class
+matching the app's existing `.btn-save` look (dark fill, white text, rounded).
+
+Clicking it opens `#start-own-trip-modal` — a small confirmation dialog, not an immediate copy —
+pre-filled with the source trip's name in an editable text input (`openStartOwnTripModal(snap)`,
+storing the snapshot as `startOwnTripSnap`). This exists because the first version cloned the
+trip under its original name unconditionally, which is confusing once you have two trips called
+the same thing; now the viewer explicitly confirms (or changes) the name before anything is
+created, with empty-name validation blocking the create. Confirming calls
+`startOwnTripFromShare(snap, newName)` — signs the viewer in if they aren't already
+(`auth.signInWithPopup()`, same Google provider as the main auth screen) and then creates a
+brand-new `trips`/`tripData`/`tripNotes` doc set seeded from the snapshot's `places`/`routes`,
+using `newName` for the created trip's `meta.name`/`trips` doc `name` instead of blindly reusing
+the source name — owned solely by them, exactly like Copy Trip's own create logic, just sourced
+from a `publicTrips` doc instead of a live trip they already participate in. **Deliberately never**
+seeded from the snapshot's `tripNotes` even when the publisher included reviews — someone else's
+personal ratings/reviews aren't something a fresh trip should start with. Hands off into the normal
+authenticated app afterward (`location.href = location.pathname`, dropping `?share=`) rather than
+duplicating the whole post-sign-in bootstrap inline in the share view.
+
+⬜ **Known limitation, not yet resolved**: viewing a shared snapshot never requires allowlist
+membership, but *creating* a trip always does — the `trips` `create` rule requires `isAllowed()` the
+same as every other write (see "Security model"). So "start my own trip" only actually works for a
+viewer who's already on the app's global allowlist; anyone else hits `permission-denied`, shown as
+"You'll need to be added to this app's allowlist..." rather than a raw Firebase error, but still a
+dead end for a genuinely outside recipient. Loosening the `create` rule specifically for this path
+(e.g. letting anyone authenticated, not just allowlisted users, create a trip) would be a real
+expansion of who can write to this app at all, not a decision to make silently — flagged here for a
+future call rather than resolved.
+
+`?share=tripId` in the URL is checked at script boot, before the normal `auth.onAuthStateChanged`
+listener is even registered — a fully separate, unauthenticated path (`renderShareView()`) rather
+than a branch inside the authenticated app flow, so an ambient signed-in session from a previous
+visit can't flash the normal app UI over the share view. It reuses the same rendering helpers the
+authenticated app uses (`placeDetailHtml()`, `formatDateRange()`, ...) by populating the same global
+`tripData`/`tripNotes` they already read from — this path never writes anything back (aside from the
+opt-in "start my own trip" action above), and only ever reads `publicTrips/{tripId}`, never the real
+`trips`/`tripData`/`tripNotes` docs. A missing/unpublished trip shows a plain "not published"
+message rather than an error page. **Routes render differently depending on whether reviews were
+included**: without `tripNotes` in the snapshot, falls back to the same compact
+`routeStopSequenceLine()` used everywhere else (`shareRouteHtml()`, `hasReviews=false` branch); with
+`tripNotes` present, renders full per-stop detail via `placeDetailHtml()` plus a done-checkmark
+(`stopRatingSummaryHtml()` — the same compact star-string helper Day-by-day Level 2 uses) and the
+actual review text (`shareStopReviewHtml()`, a new helper — `stopRatingSummaryHtml()` alone only
+ever showed star counts, not what anyone actually wrote, which was the whole point of choosing to
+share reviews at all).
 
 ## File uploads (Phase 8, not yet enabled)
 
@@ -738,6 +1114,30 @@ multi-tab support alongside it, since both people may have the app open in more 
 - **Fonts**: Fraunces (serif, headers) / Inter (sans, body) / JetBrains Mono (data, labels).
 - **Components**: rounded cards (`.card`), pill tags (`.tag`, `.badge`), sticky tab nav, day-stop
   vertical timeline with a dashed connector.
+- **Modals**: `.modal-actions` (Cancel/Save row) is `position:sticky; bottom:0` within `.modal-box`'s
+  own scroll area, not just a trailing element that scrolls away — added after a tall modal (the
+  route editor, the advanced search dialog) required scrolling all the way down just to find the
+  Save button. Applies to every `.modal-box`/`.modal-actions` pair automatically, not something to
+  opt into per modal. Clicking the backdrop closes the modal, but only past a margin
+  (`MODAL_OUTSIDE_CLICK_MARGIN_PX`, 60px, `isClickPastModalMargin()`) beyond the dialog's actual
+  edge — a click landing right at the boundary (a near-miss on content close to the edge, or a
+  scrollbar) used to close it immediately same as a deliberate click way out on the backdrop, which
+  read as accidental dismissal. Every backdrop-click-to-close handler in the app goes through this
+  helper; add new ones the same way rather than a bare `e.target.id === '...-modal'` check.
+- **Note differentiation**: several distinct "note" concepts used to all render as the same plain
+  `.place-meta` line, making them impossible to tell apart at a glance. Each now has its own
+  treatment: a structured field's own qualifier (`price.note`, `hours.note` — "Pay per stall",
+  "Guard change ~12:00") renders as a small inline pill right next to the value it annotates
+  (`.field-note-chip`, via `noteChipHtml()`), not joined into the same text with " · "; a place's
+  general description (`places[].note`) gets its own italicized, lightly-backgrounded block
+  (`.place-general-note`); a route's per-stop planning note (`routes[].stops[].note`) renders
+  directly beneath that with no label at all (`.route-stop-note`, a different background color is
+  the only thing distinguishing it) — previously both showed a text label ("Planning note:"/"Note
+  for this stop:") that then had to be manually kept in sync across every place these render
+  (`placeDetailHtml()`, the Routes tab's expanded view, the Places tab list). `placeDetailHtml()`
+  takes the route note as `opts.routeNote` rather than the caller appending its own separately-
+  styled line after the call, so the two notes always end up adjacent and consistently styled
+  regardless of caller.
 - Keep new UI consistent with these rather than introducing new colors/fonts per feature.
 
 ## Current status
@@ -776,15 +1176,39 @@ multi-tab support alongside it, since both people may have the app open in more 
   from JSON is not built
 - ✅ Routes tab (Phase 4): AI route generation mirroring the Places AI-generation pipeline, a manual
   route editor with a live map (also used to edit AI-generated routes — add/remove/reorder stops,
-  break items, per-stop planning notes, typed travel legs with unit-aware distance/time/cost and a
-  preset+custom type picker), list grouped by city with Edit/Delete, per-route day-assignment chips,
-  and an expandable per-route list+map view (numbered markers + connecting line, bidirectional
-  list/map focus) — see "Routing / planning" above. Real travel-time lookups and an in-app
-  clustering algorithm are explicitly deferred
-- ✅ Day-by-day tab (Phase 5): day picker → route overview (list+sticky map, reusing the Routes tab's
-  expandable-view code) → single-stop execution view (completion checkbox, per-person 1-10 rating +
-  note, shared note) — see "Day-by-day tab" above. `days[]` auto-syncs to the trip's date range.
-  Reaching a stop's detail view is manual (no auto-advance to the next undone stop yet)
+  per-stop planning notes, unified "interstop" items — break or typed travel leg, zero-or-more per
+  gap between stops, unit-aware distance/time/cost — a weighted proximity+variety sort on the
+  add-place search, and an advanced search dialog with checkboxes and recoloring map pins for
+  picking several places at once, see "Routing / planning"). AI-generated candidate routes can be
+  edited (same editor, a `'preview'` mode) before the "Import selected" commit step. List grouped by
+  city with Edit/Delete, and an expandable per-route list+map view
+  (numbered markers + connecting line, bidirectional list/map focus). The stop sequence (compact
+  card, AI-preview checklist, expanded view, editor, Day-by-day Level 3) renders one stop per line
+  with each gap's interstop item(s) on their own indented line beneath, and shows each place's
+  thumbnail where one exists (`routeStopThumbHtml()`) — see "Routing / planning". `normalizeRoute(route)` reads
+  either the old interleaved-stops-with-per-stop-travel shape or the new places+interstops shape and
+  returns a uniform `{places, interstops}` view — every renderer, the editor, and the Day-by-day tab
+  go through it, so old routes display correctly without a migration step and only "upgrade" to the
+  new shape once edited and saved. Real travel-time lookups and an in-app clustering algorithm are
+  explicitly deferred
+- ✅ Day-by-day tab (Phase 4 assignment + Phase 5 execution): a "+ Add routes" checklist assigns
+  routes to the selected day (moved here from the Routes tab, see "Day-by-day tab" above) → route
+  overview (one assigned-route row per line, list+sticky map reusing the Routes tab's
+  expandable-view code, with reorder/remove, full Places-tab-level detail per stop via the shared
+  `placeDetailHtml()`) → single-stop execution view (same full detail plus an interactive wishlist
+  checklist, Prev/Next navigation with an "N / M" counter, a 1-5 full-width star rating + one review
+  textarea replacing the old numeric rating/two-note-fields/manual-done-checkbox combo — done is now
+  auto-set from rating/review) — see "Day-by-day tab" above. `days[]` auto-syncs to the trip's date
+  range. Reaching a stop's detail view the first time is still manual (no auto-advance to the next
+  undone stop on entry)
+- ✅ Multi-user access control (Phase 7): the trip picker and Firestore rules now both filter by
+  `participants`, closing a real gap where every allowlisted user could see every trip — see
+  "Multi-user sharing" above. "Manage collaborators" (invite/remove/leave) on the Overview tab, and
+  an admin-only allowlist panel (header "Admin" button) for `config/allowlist`
+- ✅ Static/public sharing (Phase 7): "Publish / Share…" writes a filtered, point-in-time copy to
+  `publicTrips/{tripId}` (openly readable, checkboxes for what to include, `tripNotes.documents`
+  never included) and `?share=tripId` renders it read-only with no sign-in — see "Static/public
+  sharing" above
 - ⬜ Everything else in this file is planned, not built
 
 An earlier draft of `index.html` (superseded) had a trip picker, tabs, and per-place done+note
@@ -794,7 +1218,6 @@ current schema from the ground up, starting with the shell + auth.
 
 ## Open questions (genuinely undecided — flag if implementing, don't just guess)
 
-- Should "add collaborator" be owner-only, or can any participant invite others?
 - If only one person rates a place, does that count, or does the UI nudge for both?
 - Exact JSON size/complexity where template-splitting (Phase 2) actually becomes necessary —
   no real number tested yet.
