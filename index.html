@@ -1156,6 +1156,17 @@ function formatDateRange(startIso, endIso){
   return `${one.d} ${MONTH_ABBR[one.m-1]} ${one.y}`;
 }
 
+// Shown to both the publisher (Publish modal) and the viewer (share link) so it's clear to
+// either side exactly which snapshot they're looking at, since a share link is a point-in-time
+// copy, not a live mirror (see "Static/public sharing" in CLAUDE.md) — re-publishing changes
+// this timestamp, so it doubles as "how stale is this link" at a glance.
+function formatPublishedAt(ms){
+  if(!ms) return '';
+  return new Date(ms).toLocaleString(undefined, {
+    year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'
+  });
+}
+
 function emptyPreferences(){
   return {
     freeText: '', numPeople: null,
@@ -1653,8 +1664,9 @@ async function openPublishModal(){
   document.getElementById('publish-allow-copy').checked = existing ? !!existing.allowCopy : false;
   syncPublishPlacesLock();
   const shareUrl = `${location.origin}${location.pathname}?share=${currentTripId}`;
+  const publishedAtStr = existing?.updatedAt ? formatPublishedAt(existing.updatedAt) : '';
   document.getElementById('publish-status').innerHTML = isPublished
-    ? `Published — <a href="${shareUrl}" target="_blank">${shareUrl}</a> <button type="button" class="btn-small" id="publish-copy-link">Copy link</button>`
+    ? `Published${publishedAtStr ? ` ${publishedAtStr}` : ''} — <a href="${shareUrl}" target="_blank">${shareUrl}</a> <button type="button" class="btn-small" id="publish-copy-link">Copy link</button>`
     : 'Not published yet.';
   document.getElementById('publish-unpublish').classList.toggle('hidden', !isPublished);
   document.getElementById('publish-modal').classList.remove('hidden');
@@ -1781,6 +1793,8 @@ async function renderShareView(tripId){
     document.getElementById('share-trip-summary').textContent = tripData.meta.summary || '';
     document.getElementById('share-trip-cities').innerHTML = (tripData.meta.cities||[])
       .map(c=>`<span class="tag">${c.name}${c.country ? ', '+c.country : ''}</span>`).join('');
+    document.getElementById('share-published-at').textContent = snap.updatedAt
+      ? `Published ${formatPublishedAt(snap.updatedAt)}` : '';
     document.getElementById('share-start-own-trip-section').classList.toggle('hidden', !snap.allowCopy);
 
     if((tripData.places||[]).length){
