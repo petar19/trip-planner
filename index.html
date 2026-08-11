@@ -192,6 +192,13 @@
   #day-stop-spent{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem;}
   #day-stop-paid-by{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; background:#fff;}
   .mini-stars{color:var(--gold); font-size:.78rem; margin-right:6px;}
+  .review-card{background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-top:10px;}
+  .review-card .review-text{margin-top:6px; font-size:.9rem; line-height:1.4;}
+  .spent-badge{display:inline-block; flex-shrink:0; font-size:.76rem; font-weight:600; padding:4px 10px; border-radius:8px; background:var(--mustard-soft); color:#8a6a1f; white-space:nowrap;}
+  .doc-row{background:var(--paper-raised); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:12px;}
+  .doc-row-header{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;}
+  .doc-icon{font-size:1.2rem; margin-right:8px;}
+  .doc-preview-frame{width:100%; height:420px; border:1px solid var(--line); border-radius:8px; margin-top:10px; background:#fff;}
   /* Label text left, checkbox right — every row spans the same full width, so the checkboxes all
      land at the same x position regardless of label length, instead of sitting immediately after
      text of varying width (which is what "aligned" actually meant here). */
@@ -209,10 +216,14 @@
   .edit-row{margin-top:10px; border-top:1px dashed var(--line); padding-top:8px;}
   .js-place-note{width:100%; min-height:34px; resize:vertical; font-size:.82rem; background:#FBFAF6; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-family:'Inter',sans-serif;}
 
-  /* AI preview checklist */
-  .ai-preview-row{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
+  /* AI preview checklist — used for the AI place/route import previews, the Copy Trip places
+     checklist, and the Day-by-day "Add routes" checklist. Requalified with .modal-box (0,2,0),
+     same fix as .publish-check-row's history: a bare .ai-preview-row{display:flex} (0,1,0) loses
+     to the pre-existing .modal-box label{display:block} rule (0,1,1) on specificity alone, which
+     silently stacked the checkbox above its row content instead of beside it. */
+  .modal-box .ai-preview-row{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
   .ai-preview-row:last-child{border-bottom:none;}
-  .ai-preview-row input[type=checkbox]{margin-top:3px; width:16px; height:16px; accent-color:var(--harbor); cursor:pointer;}
+  .ai-preview-row input[type=checkbox]{margin-top:3px; width:16px; height:16px; accent-color:var(--harbor); cursor:pointer; flex-shrink:0;}
   .ai-preview-row .place-meta{margin-top:1px;}
   #coords-pending-count{font-family:'JetBrains Mono',monospace; font-size:.72rem; margin-left:4px;}
 
@@ -349,7 +360,15 @@
       <div id="budget-stats" class="card" style="margin-bottom:20px;"></div>
       <div id="budget-list"></div>
     </section>
-    <section class="panel" id="p-documents"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-documents">
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+        <button type="button" class="btn-small" id="btn-docs-refresh">🔄 Refresh</button>
+        <button type="button" class="primary" id="btn-docs-add-link">+ Add link</button>
+      </div>
+      <p id="docs-no-folder-hint" class="hint hidden">No Google Drive folder set for this trip yet — add one under "Edit trip details" to browse files here. Manual links below work either way.</p>
+      <p id="docs-error" style="color:var(--red); font-size:.85rem; min-height:1em;"></p>
+      <div id="docs-list"></div>
+    </section>
     <section class="panel" id="p-manage"><p class="mono">Not built yet.</p></section>
   </main>
 </div>
@@ -417,6 +436,14 @@
         <label>Cities</label>
         <div id="et-cities-list"></div>
         <button type="button" class="btn-small" id="et-add-city">+ Add city</button>
+      </div>
+
+      <div class="span-2">
+        <label for="et-docs-folder">Documents folder (optional)</label>
+        <input id="et-docs-folder" placeholder="Paste a Google Drive folder link">
+        <p class="hint">Share the folder as "Anyone with the link" first — its files then show up in
+          the Documents tab. Clearing this field stops browsing/uploading there (existing document
+          notes aren't deleted).</p>
       </div>
 
       <div class="span-2">
@@ -581,6 +608,13 @@
           <button type="button" class="pl-add-link-preset" data-label="Map">+ Map</button>
         </div>
         <p class="hint">A link labeled "Thumbnail" becomes this place's photo instead of showing in the list above.</p>
+      </div>
+
+      <div class="span-2">
+        <label>Related documents (optional)</label>
+        <div id="pl-docs-list"></div>
+        <p class="hint">From the Documents tab — check any that apply to this place. Each shows as a
+          link on this place wherever it's displayed (Places tab, Day-by-day).</p>
       </div>
     </div>
     <div id="pl-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
@@ -944,6 +978,44 @@
   </div>
 </div>
 
+<!-- ============ ADD/EDIT DOCUMENT ============ -->
+<div id="doc-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:560px;">
+    <h3 id="doc-modal-title">Add link</h3>
+    <div class="modal-grid">
+      <div class="span-2" id="doc-title-field">
+        <label for="doc-title">Title <span style="color:var(--red);">*</span></label>
+        <input id="doc-title" placeholder="e.g. Flight confirmation">
+      </div>
+      <div id="doc-type-field">
+        <label for="doc-type">Type (optional)</label>
+        <input id="doc-type" placeholder="e.g. Booking, Ticket, Insurance">
+      </div>
+      <div id="doc-url-field">
+        <label for="doc-url">Link <span style="color:var(--red);">*</span></label>
+        <input id="doc-url" placeholder="https://…">
+      </div>
+      <div class="span-2">
+        <label for="doc-confirmation">Confirmation number (optional)</label>
+        <input id="doc-confirmation">
+      </div>
+      <div class="span-2">
+        <label for="doc-related-place">Related place (optional)</label>
+        <select id="doc-related-place"><option value="">None</option></select>
+      </div>
+      <div class="span-2">
+        <label for="doc-note">Note (optional)</label>
+        <textarea id="doc-note"></textarea>
+      </div>
+    </div>
+    <div id="doc-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="doc-cancel">Cancel</button>
+      <button class="btn-save" id="doc-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ PUBLISH / SHARE ============ -->
 <div id="publish-modal" class="modal-backdrop hidden">
   <div class="modal-box">
@@ -1054,6 +1126,29 @@ const db = firebase.firestore();
 db.enablePersistence({synchronizeTabs: true}).catch(err=>{
   console.warn('Offline persistence not enabled:', err.code);
 });
+
+// =========================================================================
+// Google Drive API key — for the Documents tab (see CLAUDE.md "Documents tab").
+// From the SAME Google Cloud project as firebaseConfig above (Cloud Console → APIs & Services →
+// Library → enable "Google Drive API" → Credentials → Create API key), then restrict it:
+//   - API restrictions: Google Drive API only
+//   - Application restrictions: HTTP referrers matching this app's real origin(s) + localhost
+// This is NOT a secret the way an AI provider key is — it only grants read access to whatever
+// folder a trip's own "Edit trip details" points it at, and that folder must already be shared
+// "Anyone with the link" for the listing to work at all. Same trust model as firebaseConfig above.
+// =========================================================================
+const DRIVE_API_KEY = 'AIzaSyA2bA4pyGfCnBYpeNDgZKiSpc1b7rfE8qo';
+
+// Accepts either a full folder share link (https://drive.google.com/drive/folders/<id>?usp=...)
+// or a bare folder ID pasted directly — Edit Trip Details' "Documents folder" field takes either,
+// so re-pasting a link someone copied from their browser bar just works without the user having to
+// manually trim it down to the ID themselves.
+function extractDriveFolderId(raw){
+  const val = (raw||'').trim();
+  if(!val) return null;
+  const m = val.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : val;
+}
 
 // ---------- Modal outside-click-to-close ----------
 // A click landing right at the edge of a dialog (a near-miss on content near the boundary, or on
@@ -1280,6 +1375,7 @@ async function loadTrip(slug){
     tripNotes = { places: d.places||{}, routeStops: d.routeStops||{}, documents: d.documents||{} };
     renderPlaces();
     if(document.getElementById('p-budget').classList.contains('active')) renderBudget();
+    if(document.getElementById('p-documents').classList.contains('active')) renderDocuments();
   });
 }
 
@@ -1462,6 +1558,7 @@ function openEditTripModal(mode){
 
   document.getElementById('et-cities-list').innerHTML = '';
   (meta.cities||[]).forEach(c=>addCityRow(c.name, c.country));
+  document.getElementById('et-docs-folder').value = meta.docsFolderId || '';
 
   etTravelMethodsPicker.set(prefs.travelMethods);
   catWantPicker.set(prefs.catWant);
@@ -1564,6 +1661,7 @@ async function saveTripDetails(){
     ...(tripModalMode === 'edit' ? tripData.meta : {}),
     name, startDate, endDate, cities, defaultCurrency,
     summary: document.getElementById('et-summary').value.trim(),
+    docsFolderId: extractDriveFolderId(document.getElementById('et-docs-folder').value),
     preferences
   };
 
@@ -2092,6 +2190,7 @@ document.getElementById('tabs').addEventListener('click', e=>{
   if(e.target.dataset.tab === 'routes') renderRoutes();
   if(e.target.dataset.tab === 'days') renderDays();
   if(e.target.dataset.tab === 'budget') renderBudget();
+  if(e.target.dataset.tab === 'documents') renderDocuments();
 });
 
 // ---------- Map ----------
@@ -2360,7 +2459,7 @@ function renderPlaces(){
           ${p.note ? `<div class="place-general-note">${p.note}</div>` : ''}
           ${(p.wishlist||[]).length ? `<div class="place-meta">Wishlist: ${p.wishlist.join(', ')}</div>` : ''}
           <div style="margin-top:6px;">
-            <a class="place-link" href="${mapLink(p.name+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${coordsTag}
+            <a class="place-link" href="${mapLink(p.name+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${relatedDocLinksHtml(id)}${coordsTag}
           </div>
           <div class="place-actions">
             <button class="js-edit-place" data-idx="${i}">Edit</button>
@@ -2585,8 +2684,29 @@ function openPlaceModal(idx){
   document.getElementById('pl-error').textContent = '';
   document.getElementById('pl-links-list').innerHTML = '';
   (p.links||[]).forEach(l=>addLinkRow(l.label, l.url));
+  renderPlaceDocsChecklist(idx!=null ? p.id : null);
   document.getElementById('place-modal').classList.remove('hidden');
   document.getElementById('pl-name').focus();
+}
+
+// The reverse direction of linking a document to a place — set from the Documents tab today (see
+// "Documents tab"), this lets it be set from the place side too. Reuses getMergedDocsList() so the
+// same Drive+manual merge shows here as on the Documents tab itself; if the Documents tab hasn't
+// been opened yet this session, docsListCache is still empty and only manual links show — a known
+// simplification, not a live re-fetch triggered from here.
+function renderPlaceDocsChecklist(currentPlaceId){
+  const el = document.getElementById('pl-docs-list');
+  const docs = getMergedDocsList(docsListCache || []);
+  if(!docs.length){ el.innerHTML = '<p class="hint">No documents yet — add some in the Documents tab.</p>'; return; }
+  el.innerHTML = docs.map(d=>{
+    const checked = currentPlaceId != null && d.relatedPlaceId === currentPlaceId;
+    const icon = d.source === 'manual' ? '🔗' : docTypeIcon(d.mimeType);
+    const label = d.source === 'manual' ? (d.title || 'Untitled link') : d.name;
+    return `<label class="ai-preview-row" style="cursor:pointer;">
+      <input type="checkbox" class="pl-doc-check" data-doc-id="${d.id}" ${checked?'checked':''}>
+      <div class="place-name" style="font-size:.92rem;">${icon} ${label}</div>
+    </label>`;
+  }).join('');
 }
 document.getElementById('btn-add-place').addEventListener('click', ()=>openPlaceModal(null));
 document.getElementById('pl-cancel').addEventListener('click', ()=>document.getElementById('place-modal').classList.add('hidden'));
@@ -2662,6 +2782,31 @@ async function savePlace(){
   await db.collection('tripData').doc(currentTripId).update({ places });
   await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
   tripData.places = places;
+
+  // Related documents: write relatedPlaceId changes to tripNotes.documents based on what's
+  // checked now vs. what was already linked to this place before this save — unlink anything
+  // unchecked that used to point here, link anything newly checked (including a Drive file with no
+  // prior metadata entry at all, which just gets a fresh minimal one). A single merge write, empty
+  // patch (no write at all) if nothing actually changed.
+  const checkedDocIds = new Set(Array.from(document.querySelectorAll('.pl-doc-check:checked')).map(cb=>cb.dataset.docId));
+  const existingDocs = tripNotes.documents || {};
+  const docsPatch = {};
+  Object.entries(existingDocs).forEach(([docId, d])=>{
+    if(d.relatedPlaceId === place.id && !checkedDocIds.has(docId)) docsPatch[docId] = { relatedPlaceId: null };
+  });
+  checkedDocIds.forEach(docId=>{
+    if(existingDocs[docId]?.relatedPlaceId !== place.id){
+      docsPatch[docId] = { relatedPlaceId: place.id, createdAt: existingDocs[docId]?.createdAt || Date.now() };
+    }
+  });
+  if(Object.keys(docsPatch).length){
+    await db.collection('tripNotes').doc(currentTripId).set({ documents: docsPatch }, { merge: true });
+    if(!tripNotes.documents) tripNotes.documents = {};
+    Object.entries(docsPatch).forEach(([docId, patch])=>{
+      tripNotes.documents[docId] = { ...(tripNotes.documents[docId]||{}), ...patch };
+    });
+  }
+
   renderPlaces();
   document.getElementById('place-modal').classList.add('hidden');
 }
@@ -4415,8 +4560,12 @@ document.getElementById('days-route-picker').addEventListener('click', async e=>
 // one place a day's full route list is visible together, unlike the Routes tab where a route is
 // being evaluated in isolation. Mirrors the Copy-trip places-checklist pattern
 // (renderCopyPlacesChecklist()): checkboxes grouped by city, Select all/Select none. Only routes
-// not already on this day are listed — nothing to dedup against if an already-assigned route was
-// never offered as an option in the first place.
+// not already on THIS day are listed — nothing to dedup against if an already-assigned route was
+// never offered as an option in the first place. A route already assigned to one or more OTHER
+// days can still be added here too (explicit alternates are a supported pattern — see "Routing /
+// planning" in CLAUDE.md), but it's flagged ("Already on: Day 1, Day 3") so adding it is a
+// deliberate choice, not an accidental double-booking, and sorted to the bottom of its city group
+// so the untouched options are what you see first.
 function renderAddRoutesChecklist(){
   const el = document.getElementById('ar-routes-list');
   const day = (tripData.days||[]).find(d=>d.date === daysSelectedDate);
@@ -4426,16 +4575,26 @@ function renderAddRoutesChecklist(){
     el.innerHTML = '<p class="hint">All routes are already assigned to this day.</p>';
     return;
   }
+  const otherDaysFor = r => (tripData.days||[]).filter(d => d.date !== daysSelectedDate && (d.assignedRoutes||[]).includes(r.id));
   const byCity = new Map();
   routes.forEach(r=>{
     if(!byCity.has(r.city)) byCity.set(r.city, []);
     byCity.get(r.city).push(r);
   });
   el.innerHTML = Array.from(byCity.entries()).map(([city, items])=>{
-    const rows = items.map(r=>`<label class="ai-preview-row" style="cursor:pointer;">
-      <input type="checkbox" class="ar-route-check" data-route-id="${r.id}">
-      <div class="place-name" style="font-size:.92rem;">${r.label}</div>
-    </label>`).join('');
+    const sorted = items.slice().sort((a,b) => otherDaysFor(a).length - otherDaysFor(b).length);
+    const rows = sorted.map(r=>{
+      const otherDays = otherDaysFor(r);
+      const takenStr = otherDays.length
+        ? `<div class="place-meta" style="color:#8a6a1f;">Already on: ${otherDays.map(d=>d.label).join(', ')}</div>` : '';
+      return `<label class="ai-preview-row" style="cursor:pointer;">
+        <input type="checkbox" class="ar-route-check" data-route-id="${r.id}">
+        <div style="flex:1; min-width:0;">
+          <div class="place-name" style="font-size:.92rem;">${r.label}</div>
+          ${takenStr}
+        </div>
+      </label>`;
+    }).join('');
     return `<h4 style="margin:12px 0 6px;">${city || 'Unassigned city'}</h4>${rows}`;
   }).join('');
 }
@@ -4486,6 +4645,26 @@ document.getElementById('ar-add').addEventListener('click', async ()=>{
 // opts.interactiveWishlist: Day-by-day Level 3 only — renders the wishlist as a checkable list of
 // mini-goals (tripNotes.places[id].wishlistChecked) instead of the plain comma-joined summary used
 // everywhere else (Level 2, advanced search, etc. don't need per-item interactivity there).
+// Documents linked to a place (see "Documents tab" — relatedPlaceId, settable from either side)
+// rendered as ordinary place links, same row as Map/other links, so they're one click away
+// wherever the place shows up — the Places tab, Routes, and Day-by-day while actually executing
+// the plan — not just from the Documents tab itself. A Drive-linked entry has no friendly filename
+// available here (that only exists in the Documents tab's live-fetched listing, not in
+// tripNotes.documents), so it's labeled generically ("View in Drive") rather than guessing a name
+// that could be wrong; a manual link already has a real title, so that's used instead. Naturally
+// empty (and so never rendered) on the published share view — tripNotes.documents is deliberately
+// never included in a snapshot (see "Static/public sharing"). Shared by placeDetailHtml() and the
+// Places tab's own row renderer (renderPlaces()), which doesn't go through placeDetailHtml().
+function relatedDocLinksHtml(placeId){
+  return Object.entries(tripNotes.documents || {})
+    .filter(([id,d])=>d.relatedPlaceId === placeId)
+    .map(([id,d])=>{
+      const url = d.source === 'manual' ? d.url : `https://drive.google.com/file/d/${id}/view`;
+      const label = d.source === 'manual' ? (d.title || 'Document') : 'View in Drive';
+      return `<a class="place-link" href="${url}" target="_blank">${label} ↗</a>`;
+    }).join('');
+}
+
 function placeDetailHtml(p, opts){
   opts = opts || {};
   if(!p) return '<p class="mono">Unknown place.</p>';
@@ -4527,7 +4706,7 @@ function placeDetailHtml(p, opts){
       ${opts.routeNote ? `<div class="route-stop-note">${opts.routeNote}</div>` : ''}
       ${wishlistHtml}
       <div style="margin-top:6px;">
-        <a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}
+        <a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${relatedDocLinksHtml(p.id)}
       </div>
     </div>
   </div>`;
@@ -4549,14 +4728,26 @@ async function updateDayPriceConversions(places){
 // (placeDetailHtml(), same richness as the Places tab), a stop-done visual marker, and every row
 // (not just ones with coordinates) being clickable into Level 3, since execution needs to mark ANY
 // stop done/rated regardless of whether it has a map marker.
-// Compact per-person star strings for a stop, shown in the Level 2 list so a rating is visible
-// without drilling into Level 3 — one small star string per participant who's actually rated
-// (skips anyone who hasn't), the person's email as a tooltip since initials/names aren't tracked.
+// Compact rating summary for a stop, shown in the Level 2 list so it's visible without drilling
+// into Level 3 — average rating + review count. Revised from showing every participant's
+// individual star string side by side: that didn't scale past a couple of reviewers (a busy route
+// with 3-4 people rating every stop turned into a wall of stars). **Revised again**: an explicit
+// "✓ You reviewed" / "you haven't reviewed yet" flag was too wordy for a compact list row — only
+// the NOT-yet-reviewed case is actually worth flagging (your own review, once given, is implied —
+// nothing more to prompt), so a lone hollow star (☆, tooltip "You haven't reviewed this yet")
+// appears next to the average only when the current user hasn't rated it; nothing extra renders
+// once they have. currentUser is null on the unauthenticated share view (see renderShareView()),
+// so this is simply omitted there too.
 function stopRatingSummaryHtml(key){
   const ratings = tripNotes.routeStops?.[key]?.ratings || {};
   const rated = Object.values(ratings).filter(r=>r.value);
   if(!rated.length) return '';
-  return rated.map(r=>`<span class="mini-stars" title="${r.email||''}">${'★'.repeat(r.value)}</span>`).join(' ');
+  const avg = Math.round((rated.reduce((sum,r)=>sum+r.value, 0) / rated.length) * 10) / 10;
+  const countStr = `${rated.length} review${rated.length===1?'':'s'}`;
+  const summary = `<span class="mini-stars">★ ${avg} (${countStr})</span>`;
+  const myUid = currentUser?.uid;
+  if(!myUid || ratings[myUid]?.value) return summary;
+  return `${summary} <span class="mini-stars" title="You haven't reviewed this yet">☆</span>`;
 }
 
 function renderDayRouteOverviewHtml(route){
@@ -4651,6 +4842,35 @@ function starRatingHtml(value){
   </div>`;
 }
 
+// One review card per participant who's rated this stop — INCLUDING the current user's own, so
+// "Save review" has visible confirmation right there instead of only a "Last saved" timestamp
+// above. Revised from a single "other participants" line (current user excluded, everyone else
+// joined with <br>, no currency shown on spent, no timestamp) — that format read as a wall of text
+// once a stop had a real review attached, and silently dropped the currency a spend was actually
+// logged in. The current user's own card sorts first (`isMe` in the caller) as a small extra
+// confirmation their save landed.
+function reviewCardHtml(uid, r, isMe, defaultCur){
+  const stars = r.value ? `<span class="mini-stars">${'★'.repeat(r.value)}</span>` : '';
+  let spentBadge = '';
+  if(r.spent != null){
+    let amountStr = formatMoney(r.spent, r.currency || defaultCur);
+    if(r.currency && defaultCur && r.currency !== defaultCur && r.convertedAmount != null){
+      amountStr += ` (≈ ${formatMoney(r.convertedAmount, defaultCur)})`;
+    }
+    const paidStr = r.paidByEmail ? ` · paid by ${r.paidByEmail}` : '';
+    spentBadge = `<span class="spent-badge">${amountStr}${paidStr}</span>`;
+  }
+  const whenStr = r.updatedAt ? formatPublishedAt(r.updatedAt) : '';
+  return `<div class="review-card">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+      <div><strong>${isMe ? 'You' : (r.email||uid)}</strong> ${stars}</div>
+      ${spentBadge}
+    </div>
+    ${r.note ? `<div class="review-text">${r.note.replace(/</g,'&lt;')}</div>` : ''}
+    ${whenStr ? `<div class="place-meta" style="margin-top:6px;">${whenStr}</div>` : ''}
+  </div>`;
+}
+
 // Level 3: full detail for one stop, no map — the actual execution controls (rating/review).
 // Prev/Next cycle through the route's place-stops (interstop items aren't navigable targets —
 // navigation is stop-to-stop), with an "N/M" counter; navigating to any stop after the first shows
@@ -4664,7 +4884,10 @@ function renderDayStopDetailHtml(route, stopIdx){
   const done = !!rn.done;
   const myUid = currentUser?.uid;
   const myRating = (myUid && rn.ratings?.[myUid]) || {};
-  const otherRatings = Object.entries(rn.ratings||{}).filter(([uid])=>uid !== myUid);
+  // All reviews, current user's own included (see reviewCardHtml() above) — sorted with "You"
+  // first as a small extra confirmation the last save actually landed.
+  const allRatings = Object.entries(rn.ratings||{}).sort(([uidA],[uidB]) =>
+    (uidA===myUid ? -1 : uidB===myUid ? 1 : 0));
 
   const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
   const stayStr = formatMinutes(s.stayDuration);
@@ -4745,8 +4968,8 @@ function renderDayStopDetailHtml(route, stopIdx){
       <button type="button" class="primary" id="day-stop-save">Save review</button>
       <span class="place-meta" id="day-stop-saved-at">${savedAtStr}</span>
     </div>
-    ${otherRatings.length ? `<p class="place-meta" style="margin-top:8px;">${otherRatings.map(([uid,r])=>`${r.email||uid}: ${r.value ? '★'.repeat(r.value) : '–'}${r.note?` — ${r.note}`:''}${r.spent!=null?` — spent ${r.spent}${r.currency && r.currency !== spentDefaultCur ? ' '+r.currency : ''}${r.paidByEmail?` (paid by ${r.paidByEmail})`:''}`:''}`).join('<br>')}</p>` : ''}
     ${done ? `<p class="place-meta" style="margin-top:8px;">✓ Marked done</p>` : ''}
+    ${allRatings.map(([uid,r])=>reviewCardHtml(uid, r, uid===myUid, spentDefaultCur)).join('')}
   `;
 
   return `<div class="card">
@@ -5211,6 +5434,251 @@ document.getElementById('budget-list').addEventListener('click', e=>{
   const delBtn = e.target.closest('.js-exp-delete');
   if(delBtn){ deleteExpense(Number(delBtn.dataset.idx)); }
 });
+
+// ---------- Documents tab ----------
+// A trip's documents live in two independent places, merged into one list: the live contents of a
+// shared Google Drive folder (meta.docsFolderId, read via DRIVE_API_KEY — see the key comment near
+// firebaseConfig) and manual link entries in tripNotes.documents that don't depend on a folder at
+// all. A tripNotes.documents[docId] entry is a manual link if it carries source:'manual'
+// (title/type/url set directly); otherwise, if its key matches a file id from the live Drive
+// listing, it's metadata (note/confirmationNumber/relatedPlaceId) layered onto that file — the
+// file's own name/type/view-link always come from the live listing, never stored, so they can't go
+// stale if the file is renamed in Drive. A metadata entry for a file that's no longer in the
+// listing (deleted from Drive, or the folder changed) simply doesn't render — a known
+// simplification, not handled specially.
+function docTypeIcon(mimeType){
+  if(!mimeType) return '📄';
+  if(mimeType.includes('pdf')) return '📕';
+  if(mimeType.startsWith('image/')) return '🖼️';
+  if(mimeType.includes('folder')) return '📁';
+  if(mimeType.includes('spreadsheet')) return '📊';
+  if(mimeType.includes('presentation')) return '📽️';
+  if(mimeType.includes('document')) return '📝';
+  return '📄';
+}
+// Types Drive's own embeddable preview (https://drive.google.com/file/d/<id>/preview, an <iframe>)
+// actually renders something useful for — PDFs, images, and native Google Docs/Sheets/Slides.
+// Anything else still gets a "View in Drive ↗" link, just no in-app Preview toggle.
+function docIsPreviewable(mimeType){
+  if(!mimeType) return false;
+  return mimeType.includes('pdf') || mimeType.startsWith('image/') || mimeType.includes('google-apps.document')
+    || mimeType.includes('google-apps.spreadsheet') || mimeType.includes('google-apps.presentation');
+}
+
+// Not a secret, but not yet filled in either — every call site checks this instead of letting a
+// bare placeholder string hit the real API and fail with a confusing error.
+function driveApiKeyConfigured(){ return !!DRIVE_API_KEY && !DRIVE_API_KEY.startsWith('PASTE_'); }
+
+async function listDriveFolder(folderId){
+  if(!driveApiKeyConfigured()){
+    return { files: [], error: 'Drive API key not configured yet — see the DRIVE_API_KEY comment near the top of index.html.' };
+  }
+  try{
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+    const fields = encodeURIComponent('files(id,name,mimeType,webViewLink)');
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&key=${DRIVE_API_KEY}&fields=${fields}&orderBy=name`);
+    const data = await res.json();
+    if(data.error) return { files: [], error: data.error.message || 'Drive API error.' };
+    return { files: data.files || [], error: null };
+  }catch(err){
+    console.warn('Drive folder listing failed:', err);
+    return { files: [], error: 'Network error while listing the Drive folder.' };
+  }
+}
+
+// Cached per folder, not re-fetched on every tab visit — switching tabs back and forth shouldn't
+// hit the Drive API each time. "🔄 Refresh" (and right after an upload) forces a fresh fetch;
+// otherwise renderDocuments() reuses whatever's cached, only re-fetching when the folder itself
+// changes. This is a fetch-on-demand mirror of the folder's contents, not a live subscription —
+// Drive's API has no free push-based equivalent to Firestore's onSnapshot, so a file someone else
+// adds directly in Drive shows up on next open/refresh, not instantly.
+let docsListCache = null;
+let docsListCacheFolderId = null;
+
+async function renderDocuments(forceRefresh){
+  const folderId = tripData?.meta?.docsFolderId || null;
+  document.getElementById('docs-no-folder-hint').classList.toggle('hidden', !!folderId);
+  const errEl = document.getElementById('docs-error');
+  errEl.textContent = '';
+
+  let driveFiles = [];
+  if(folderId){
+    if(forceRefresh || docsListCacheFolderId !== folderId || docsListCache === null){
+      const { files, error } = await listDriveFolder(folderId);
+      docsListCache = files;
+      docsListCacheFolderId = folderId;
+      if(error) errEl.textContent = error;
+    }
+    driveFiles = docsListCache || [];
+  }else{
+    docsListCache = null;
+    docsListCacheFolderId = null;
+  }
+
+  renderDocsList(driveFiles);
+}
+
+// Shared by the Documents tab's own list and the place modal's "Related documents" picker (see
+// openPlaceModal()) — same merge of live Drive files + tripNotes.documents metadata either way.
+// The place picker calls this with whatever's in docsListCache (possibly [] if the Documents tab
+// hasn't been opened yet this session, in which case only manual links show there — a known
+// simplification, not a live re-fetch triggered from the place modal).
+function getMergedDocsList(driveFiles){
+  const meta = tripNotes.documents || {};
+  const driveRows = (driveFiles||[]).map(f => ({
+    id: f.id, source: 'drive', name: f.name, mimeType: f.mimeType, webViewLink: f.webViewLink,
+    note: meta[f.id]?.note || '', confirmationNumber: meta[f.id]?.confirmationNumber || '',
+    relatedPlaceId: meta[f.id]?.relatedPlaceId || null
+  }));
+  const manualRows = Object.entries(meta)
+    .filter(([id,d])=>d.source==='manual')
+    .map(([id,d])=>({ id, ...d }));
+  return [...driveRows, ...manualRows];
+}
+
+function renderDocsList(driveFiles){
+  const el = document.getElementById('docs-list');
+  const all = getMergedDocsList(driveFiles);
+  el.innerHTML = all.length ? all.map(docRowHtml).join('') : '<p class="hint">No documents yet.</p>';
+}
+
+function docRowHtml(doc){
+  const place = doc.relatedPlaceId ? (tripData.places||[]).find(p=>p.id===doc.relatedPlaceId) : null;
+  const isManual = doc.source === 'manual';
+  const icon = isManual ? '🔗' : docTypeIcon(doc.mimeType);
+  const title = isManual ? (doc.title || 'Untitled link') : doc.name;
+  const viewUrl = isManual ? doc.url : doc.webViewLink;
+  const canPreview = !isManual && docIsPreviewable(doc.mimeType);
+  return `<div class="doc-row" data-doc-id="${doc.id}" data-doc-source="${doc.source||'drive'}">
+    <div class="doc-row-header">
+      <div><span class="doc-icon">${icon}</span><strong>${title}</strong>${!isManual && doc.type ? ` <span class="place-meta">${doc.type}</span>` : ''}${isManual && doc.type ? ` <span class="tag">${doc.type}</span>` : ''}</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        ${canPreview ? `<button type="button" class="btn-small js-doc-preview-toggle">Preview</button>` : ''}
+        <a class="btn-small" style="text-decoration:none; display:inline-block;" href="${viewUrl}" target="_blank">${isManual ? 'Open ↗' : 'View in Drive ↗'}</a>
+        <button type="button" class="btn-small js-doc-edit">Edit details</button>
+        ${isManual ? `<button type="button" class="btn-small js-doc-delete">Delete</button>` : ''}
+      </div>
+    </div>
+    ${doc.confirmationNumber ? `<div class="place-meta" style="margin-top:6px;">Confirmation: ${doc.confirmationNumber}</div>` : ''}
+    ${place ? `<div class="place-meta">Related: ${place.name}</div>` : ''}
+    ${doc.note ? `<div class="place-general-note">${doc.note}</div>` : ''}
+    <div class="doc-preview-slot"></div>
+  </div>`;
+}
+
+document.getElementById('docs-list').addEventListener('click', e=>{
+  const previewBtn = e.target.closest('.js-doc-preview-toggle');
+  if(previewBtn){
+    const row = previewBtn.closest('.doc-row');
+    const slot = row.querySelector('.doc-preview-slot');
+    if(slot.innerHTML){ slot.innerHTML = ''; previewBtn.textContent = 'Preview'; return; }
+    slot.innerHTML = `<iframe class="doc-preview-frame" src="https://drive.google.com/file/d/${row.dataset.docId}/preview" allow="autoplay"></iframe>`;
+    previewBtn.textContent = 'Hide preview';
+    return;
+  }
+  const editBtn = e.target.closest('.js-doc-edit');
+  if(editBtn){
+    const row = editBtn.closest('.doc-row');
+    openDocEditModal(row.dataset.docId, row.dataset.docSource);
+    return;
+  }
+  const delBtn = e.target.closest('.js-doc-delete');
+  if(delBtn){
+    const row = delBtn.closest('.doc-row');
+    deleteManualDoc(row.dataset.docId);
+  }
+});
+
+function populateDocPlaceSelect(selectedId){
+  const sel = document.getElementById('doc-related-place');
+  const places = tripData?.places || [];
+  sel.innerHTML = '<option value="">None</option>' + places.map(p=>`<option value="${p.id}">${p.city ? `${p.city} — ` : ''}${p.name}</option>`).join('');
+  sel.value = selectedId || '';
+}
+
+let editingDocId = null;
+let editingDocSource = null; // 'manual' | 'drive'
+
+function openDocLinkModal(){
+  editingDocId = null;
+  editingDocSource = 'manual';
+  document.getElementById('doc-modal-title').textContent = 'Add link';
+  document.getElementById('doc-title-field').classList.remove('hidden');
+  document.getElementById('doc-type-field').classList.remove('hidden');
+  document.getElementById('doc-url-field').classList.remove('hidden');
+  document.getElementById('doc-title').value = '';
+  document.getElementById('doc-type').value = '';
+  document.getElementById('doc-url').value = '';
+  document.getElementById('doc-confirmation').value = '';
+  document.getElementById('doc-note').value = '';
+  populateDocPlaceSelect('');
+  document.getElementById('doc-error').textContent = '';
+  document.getElementById('doc-modal').classList.remove('hidden');
+  document.getElementById('doc-title').focus();
+}
+document.getElementById('btn-docs-add-link').addEventListener('click', openDocLinkModal);
+
+function openDocEditModal(docId, source){
+  editingDocId = docId;
+  editingDocSource = source;
+  const existing = (tripNotes.documents || {})[docId] || {};
+  const isManual = source === 'manual';
+  document.getElementById('doc-modal-title').textContent = isManual ? 'Edit link' : 'Edit document details';
+  document.getElementById('doc-title-field').classList.toggle('hidden', !isManual);
+  document.getElementById('doc-type-field').classList.toggle('hidden', !isManual);
+  document.getElementById('doc-url-field').classList.toggle('hidden', !isManual);
+  document.getElementById('doc-title').value = existing.title || '';
+  document.getElementById('doc-type').value = existing.type || '';
+  document.getElementById('doc-url').value = existing.url || '';
+  document.getElementById('doc-confirmation').value = existing.confirmationNumber || '';
+  document.getElementById('doc-note').value = existing.note || '';
+  populateDocPlaceSelect(existing.relatedPlaceId || '');
+  document.getElementById('doc-error').textContent = '';
+  document.getElementById('doc-modal').classList.remove('hidden');
+}
+
+document.getElementById('doc-cancel').addEventListener('click', ()=>document.getElementById('doc-modal').classList.add('hidden'));
+document.getElementById('doc-modal').addEventListener('click', e=>{
+  if(e.target.id === 'doc-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)){
+    document.getElementById('doc-modal').classList.add('hidden');
+  }
+});
+
+async function saveDocModal(){
+  const errEl = document.getElementById('doc-error');
+  errEl.textContent = '';
+  const isManual = editingDocSource === 'manual';
+  let title = '', url = '';
+  if(isManual){
+    title = document.getElementById('doc-title').value.trim();
+    url = document.getElementById('doc-url').value.trim();
+    if(!title){ errEl.textContent = 'Title is required.'; return; }
+    if(!url){ errEl.textContent = 'Link is required.'; return; }
+  }
+  const docId = editingDocId || ('doc-' + Date.now().toString(36));
+  const entry = {
+    ...(isManual ? { source: 'manual', title, type: document.getElementById('doc-type').value.trim(), url } : {}),
+    note: document.getElementById('doc-note').value.trim(),
+    confirmationNumber: document.getElementById('doc-confirmation').value.trim(),
+    relatedPlaceId: document.getElementById('doc-related-place').value || null,
+    createdAt: tripNotes.documents?.[docId]?.createdAt || Date.now()
+  };
+  await db.collection('tripNotes').doc(currentTripId).set({ documents: { [docId]: entry } }, { merge: true });
+  if(!tripNotes.documents) tripNotes.documents = {};
+  tripNotes.documents[docId] = { ...(tripNotes.documents[docId]||{}), ...entry };
+  document.getElementById('doc-modal').classList.add('hidden');
+  renderDocuments();
+}
+document.getElementById('doc-save').addEventListener('click', saveDocModal);
+
+async function deleteManualDoc(docId){
+  if(!confirm('Delete this link?')) return;
+  await db.collection('tripNotes').doc(currentTripId).set({ documents: { [docId]: firebase.firestore.FieldValue.delete() } }, { merge: true });
+  if(tripNotes.documents) delete tripNotes.documents[docId];
+  renderDocuments();
+}
+
+document.getElementById('btn-docs-refresh').addEventListener('click', ()=>renderDocuments(true));
 
 // ---------- Coordinate fixer (OpenStreetMap Nominatim) ----------
 function coordsNeedsCheck(p){ return !p.coords || p.coordsSource === 'ai'; }
