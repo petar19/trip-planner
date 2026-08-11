@@ -43,6 +43,11 @@
     font-family:'Inter',sans-serif; font-size:.82rem; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
     background:rgba(255,255,255,.08); color:#F2EFE6; cursor:pointer;
   }
+  /* The <select> itself picks up the translucent-dark/cream styling above (it sits on the dark
+     header), but its dropdown popup is rendered by the browser/OS with a solid white background
+     regardless — the same light cream text on that native white background was nearly unreadable.
+     Options need their own explicit dark-on-light styling, independent of the closed control. */
+  select#trip-select option{ background:#fff; color:var(--ink); }
   header.hero button.primary{background:#F2EFE6; color:var(--ink); border-color:transparent;}
 
   main{max-width:980px; margin:0 auto; padding:36px 20px;}
@@ -185,6 +190,7 @@
   .star-btn.filled{color:var(--gold); border-color:var(--gold); background:var(--mustard-soft);}
   #day-stop-review{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; min-height:70px; resize:vertical;}
   #day-stop-spent{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem;}
+  #day-stop-paid-by{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; background:#fff;}
   .mini-stars{color:var(--gold); font-size:.78rem; margin-right:6px;}
   /* Label text left, checkbox right — every row spans the same full width, so the checkboxes all
      land at the same x position regardless of label length, instead of sitting immediately after
@@ -218,6 +224,13 @@
   .cat-chip{font-size:.78rem; font-weight:600; padding:5px 12px; border-radius:20px; border:1px solid var(--line); background:#fff; color:var(--ink-soft); cursor:pointer;}
   .cat-chip.active{background:var(--harbor); color:#fff; border-color:var(--harbor);}
   .btn-small{background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; padding:8px 14px; font-size:.85rem; font-weight:600;}
+  /* "+ Add place"/"+ Add route manually"/"+ Add expense" all use class="primary" but only
+     `header.hero button.primary` (above) was ever actually styled — every one of them was
+     rendering as a bare, unstyled browser-default button in the main content area, not just the
+     expense one that got noticed first. A plain, unscoped rule here covers all of them (and any
+     future one); the more specific header.hero rule still wins there via specificity. */
+  button.primary{background:var(--ink); color:var(--paper); border:none; padding:10px 16px; border-radius:8px; font-weight:600; font-size:.88rem; cursor:pointer;}
+  button.primary:hover{background:#2C4054;}
 </style>
 </head>
 <body>
@@ -329,7 +342,13 @@
       <button type="button" class="btn-small" id="btn-days-add-routes" style="margin-bottom:16px;">+ Add routes</button>
       <div id="days-content"></div>
     </section>
-    <section class="panel" id="p-budget"><p class="mono">Not built yet.</p></section>
+    <section class="panel" id="p-budget">
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+        <button class="primary" id="btn-add-expense">+ Add expense</button>
+      </div>
+      <div id="budget-stats" class="card" style="margin-bottom:20px;"></div>
+      <div id="budget-list"></div>
+    </section>
     <section class="panel" id="p-documents"><p class="mono">Not built yet.</p></section>
     <section class="panel" id="p-manage"><p class="mono">Not built yet.</p></section>
   </main>
@@ -879,6 +898,52 @@
   </div>
 </div>
 
+<!-- ============ ADD/EDIT EXPENSE ============ -->
+<div id="expense-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:560px;">
+    <h3 id="exp-modal-title">Add expense</h3>
+    <div class="modal-grid">
+      <div>
+        <label for="exp-amount">Amount <span style="color:var(--red);">*</span></label>
+        <input id="exp-amount" type="number" step="any" min="0" placeholder="150">
+      </div>
+      <div>
+        <label for="exp-currency">Currency</label>
+        <select id="exp-currency"></select>
+      </div>
+
+      <div class="span-2">
+        <label>Category (optional)</label>
+        <div id="exp-cat-chips" class="cat-picker"></div>
+      </div>
+
+      <div>
+        <label for="exp-date">Date (optional)</label>
+        <input id="exp-date" type="date">
+      </div>
+      <div>
+        <label for="exp-paid-by">Paid by (optional)</label>
+        <select id="exp-paid-by"><option value="">Unspecified</option></select>
+      </div>
+
+      <div class="span-2">
+        <label for="exp-place">Related place (optional)</label>
+        <select id="exp-place"><option value="">None</option></select>
+      </div>
+
+      <div class="span-2">
+        <label for="exp-note">Note (optional)</label>
+        <textarea id="exp-note" placeholder="What was this for?"></textarea>
+      </div>
+    </div>
+    <div id="exp-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="exp-cancel">Cancel</button>
+      <button class="btn-save" id="exp-save">Save expense</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ PUBLISH / SHARE ============ -->
 <div id="publish-modal" class="modal-backdrop hidden">
   <div class="modal-box">
@@ -1122,7 +1187,15 @@ function loadTripIndex(){
       opt.textContent = range ? `${d.name || doc.id} (${range})` : (d.name || doc.id);
       sel.appendChild(opt);
     });
-    if(!currentTripId || !snap.docs.some(d=>d.id===currentTripId)) loadTrip(snap.docs[0].id);
+    if(!currentTripId || !snap.docs.some(d=>d.id===currentTripId)){
+      // Prefer whichever trip was last picked (persisted across reloads via localStorage), as
+      // long as it's still one the user actually has access to per this live query — falls back
+      // to most-recently-updated (the list's own sort order) if there's no stored pick, or the
+      // stored one's no longer in the list (e.g. access was removed).
+      const lastTripId = localStorage.getItem('lastTripId');
+      const preferred = (lastTripId && snap.docs.some(d=>d.id===lastTripId)) ? lastTripId : snap.docs[0].id;
+      loadTrip(preferred);
+    }
   }, err=>{
     if(err.code === 'permission-denied'){
       alert('Your account isn\'t on the allow-list for this app yet. Ask whoever set up Firebase to add your email to config/allowlist.');
@@ -1143,6 +1216,7 @@ function loadTripIndex(){
 document.getElementById('trip-select').addEventListener('change', e=>loadTrip(e.target.value));
 
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const WEEKDAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function formatDateRange(startIso, endIso){
   if(!startIso && !endIso) return '';
   const parse = iso => { const [y,m,d] = iso.split('-').map(Number); return {y,m,d}; };
@@ -1183,9 +1257,10 @@ let notesUnsub = null;
 
 async function loadTrip(slug){
   currentTripId = slug;
+  localStorage.setItem('lastTripId', slug);
   document.getElementById('trip-select').value = slug;
   const doc = await db.collection('tripData').doc(slug).get();
-  tripData = doc.exists ? doc.data() : { meta:{}, places:[], routes:[], days:[], events:[], budget:[] };
+  tripData = doc.exists ? doc.data() : { meta:{}, places:[], routes:[], days:[], events:[], expenses:[] };
 
   document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('tabs').classList.remove('hidden');
@@ -1204,6 +1279,7 @@ async function loadTrip(slug){
     const d = snap.exists ? snap.data() : {};
     tripNotes = { places: d.places||{}, routeStops: d.routeStops||{}, documents: d.documents||{} };
     renderPlaces();
+    if(document.getElementById('p-budget').classList.contains('active')) renderBudget();
   });
 }
 
@@ -1508,7 +1584,7 @@ async function saveTripDetails(){
     // for a copy with its own date range; syncDaysToTripDates() regenerates them fresh once the
     // copy's dates are set, and routes stay copied so they're there to reassign.
     const copiedRoutes = tripModalMode === 'copy' ? JSON.parse(JSON.stringify(tripData.routes || [])) : [];
-    await db.collection('tripData').doc(slug).set({ meta, places, routes: copiedRoutes, days: [], events: [], budget: [] });
+    await db.collection('tripData').doc(slug).set({ meta, places, routes: copiedRoutes, days: [], events: [], expenses: [] });
     await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
     document.getElementById('edit-trip-modal').classList.add('hidden');
     loadTrip(slug);
@@ -1869,7 +1945,7 @@ async function startOwnTripFromShare(snap, newName){
     });
     await db.collection('tripData').doc(slug).set({
       meta, places: snap.places || [], routes: snap.routes || [],
-      days: [], events: [], budget: [] // same reasoning as Copy Trip — old day-to-date bindings don't carry over
+      days: [], events: [], expenses: [] // same reasoning as Copy Trip — old day-to-date bindings don't carry over
     });
     await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
     // Hand off into the normal authenticated app (drops the ?share= param) — it'll boot signed in
@@ -2015,6 +2091,7 @@ document.getElementById('tabs').addEventListener('click', e=>{
   if(e.target.dataset.tab === 'places') setTimeout(renderMap, 0);
   if(e.target.dataset.tab === 'routes') renderRoutes();
   if(e.target.dataset.tab === 'days') renderDays();
+  if(e.target.dataset.tab === 'budget') renderBudget();
 });
 
 // ---------- Map ----------
@@ -4594,6 +4671,19 @@ function renderDayStopDetailHtml(route, stopIdx){
   const gapStr = stopIdx > 0 ? formatInterstopGap(interstops[stopIdx-1], true) : '';
   const gapLine = gapStr ? `<p class="place-meta">Getting here: ${gapStr}</p>` : '';
   if(p) updateDayPriceConversions([p]);
+  // undefined (the key is entirely absent — this stop's rating was never saved, or was saved
+  // before this field existed) is deliberately kept distinct from null (a previous save explicitly
+  // chose "Unspecified") — collapsing the two with `myRating.paidByEmail || currentUser.email`
+  // meant "Unspecified" could never actually stick: re-rendering after that save read the stored
+  // null back, treated it the same as "never set", and silently reselected the current user again.
+  // Only the true "never set" case (undefined) should default to you; an explicit null must stay
+  // Unspecified.
+  const paidBySelected = ('paidByEmail' in myRating) ? myRating.paidByEmail : undefined;
+  // Fire-and-forget, same pattern as updateDayPriceConversions() just above — the participants
+  // fetch is async, so by the time it resolves and queries #day-stop-paid-by, the caller
+  // (renderDaysLevel2And3()) has already synchronously assigned this function's returned HTML
+  // into the DOM.
+  populatePaidBySelect('day-stop-paid-by', paidBySelected);
 
   const navBar = `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
     <button type="button" class="btn-small js-day-stop-prev" ${stopIdx===0?'disabled':''}>← Prev</button>
@@ -4604,6 +4694,32 @@ function renderDayStopDetailHtml(route, stopIdx){
   // Rating + review are the one place to record what you thought of a stop — replaces what used
   // to be two separate free-text fields (a shared "Note" plus a personal "rating note") that read
   // as duplicates of each other with no clear reason to use one over the other.
+  //
+  // The whole panel (rating/review/spent/paid-by) is staged locally and only actually written on
+  // "Save review" — revised from saving each field the instant it changed. Save-per-field meant
+  // every single interaction (a star click, a blur on the review textarea, changing paid-by) fired
+  // its own write-then-rerender-then-refetch-participants cycle, and those cycles could overlap and
+  // race each other (see populatePaidBySelect()'s history — a sequence-number guard patched one
+  // symptom of this, but the real fix is not triggering the cycle constantly in the first place). A
+  // single explicit save point removes that whole race-condition class rather than chasing further
+  // symptoms of it, and "Last saved" makes it unambiguous whether your latest edits actually went
+  // through — reused formatPublishedAt() for the timestamp, same date/time format already used for
+  // a publish snapshot's staleness indicator.
+  const savedAtStr = myRating.updatedAt ? `Last saved ${formatPublishedAt(myRating.updatedAt)}` : 'Not yet saved';
+  // Currency for "Amount spent here" — no network fetch needed (unlike populatePaidBySelect), so
+  // it's built directly in the synchronous template rather than a post-render populate call.
+  // Defaults to the trip's own currency, per the explicit ask ("make default the trip currency"),
+  // with the stop's local currency (via its city→country, same lookup Places' price field uses)
+  // surfaced right after it in the list for the common case of paying in local cash instead —
+  // still one click away, just not silently substituted for the trip default.
+  const spentDefaultCur = tripData?.meta?.defaultCurrency || null;
+  const spentLocalCur = countryCurrencyForCity(p?.city);
+  const spentCurPriority = [spentDefaultCur, spentLocalCur].filter(Boolean);
+  const spentCurCodes = [...new Set([...spentCurPriority, ...CURRENCY_CODES.filter(c=>!spentCurPriority.includes(c))])];
+  const spentCurSelected = myRating.currency || spentDefaultCur || spentCurCodes[0] || '';
+  const spentCurOptionsHtml = spentCurCodes.map(c=>`<option value="${c}" ${c===spentCurSelected?'selected':''}>${c}</option>`).join('');
+  const spentConvertedHint = (myRating.currency && spentDefaultCur && myRating.currency !== spentDefaultCur && myRating.convertedAmount != null)
+    ? `<p class="place-meta" style="margin-top:4px;">≈ ${formatMoney(myRating.convertedAmount, spentDefaultCur)}</p>` : '';
   const ratingUI = `
     <div style="margin-top:14px;">
       <label>Your rating</label>
@@ -4614,10 +4730,22 @@ function renderDayStopDetailHtml(route, stopIdx){
       <textarea id="day-stop-review" placeholder="What did you think?">${(myRating.note||'').replace(/</g,'&lt;')}</textarea>
     </div>
     <div style="margin-top:10px;">
-      <label>Amount spent here${tripData?.meta?.defaultCurrency ? ` (${tripData.meta.defaultCurrency})` : ''}</label>
-      <input type="number" min="0" step="0.01" id="day-stop-spent" placeholder="Optional" value="${myRating.spent ?? ''}">
+      <label>Amount spent here</label>
+      <div style="display:flex; gap:8px;">
+        <input type="number" min="0" step="0.01" id="day-stop-spent" placeholder="Optional" value="${myRating.spent ?? ''}" style="flex:1;">
+        <select id="day-stop-spent-currency" style="width:100px; flex-shrink:0;">${spentCurOptionsHtml}</select>
+      </div>
+      ${spentConvertedHint}
     </div>
-    ${otherRatings.length ? `<p class="place-meta" style="margin-top:8px;">${otherRatings.map(([uid,r])=>`${r.email||uid}: ${r.value ? '★'.repeat(r.value) : '–'}${r.note?` — ${r.note}`:''}${r.spent!=null?` — spent ${r.spent}`:''}`).join('<br>')}</p>` : ''}
+    <div style="margin-top:10px;">
+      <label>Paid by</label>
+      <select id="day-stop-paid-by"><option value="${(paidBySelected !== undefined ? paidBySelected : currentUser?.email) || ''}">${(paidBySelected !== undefined ? paidBySelected : currentUser?.email) || 'Unspecified'}</option></select>
+    </div>
+    <div style="margin-top:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <button type="button" class="primary" id="day-stop-save">Save review</button>
+      <span class="place-meta" id="day-stop-saved-at">${savedAtStr}</span>
+    </div>
+    ${otherRatings.length ? `<p class="place-meta" style="margin-top:8px;">${otherRatings.map(([uid,r])=>`${r.email||uid}: ${r.value ? '★'.repeat(r.value) : '–'}${r.note?` — ${r.note}`:''}${r.spent!=null?` — spent ${r.spent}${r.currency && r.currency !== spentDefaultCur ? ' '+r.currency : ''}${r.paidByEmail?` (paid by ${r.paidByEmail})`:''}`:''}`).join('<br>')}</p>` : ''}
     ${done ? `<p class="place-meta" style="margin-top:8px;">✓ Marked done</p>` : ''}
   `;
 
@@ -4636,15 +4764,22 @@ function renderDayStopDetailHtml(route, stopIdx){
 }
 
 // Single write path for a stop's whole per-person execution entry (star value + review text +
-// amount spent) — reads whatever's currently in the form so any one trigger (a star click, editing
-// the review, or editing the spent amount) saves all three without clobbering the others. Adding a
-// rating, writing review text, or logging an amount spent is treated as strong enough evidence the
-// stop actually happened to auto-mark it done — there's no separate manual "done" checkbox anymore.
-// This only ever sets done:true, never back to false: clearing a review to empty shouldn't silently
-// un-mark a stop someone already confirmed visiting. `spent` is assumed to be in the trip's
-// meta.defaultCurrency (no per-entry currency field), same convention as interstop item cost —
-// stored per-person since whoever fills in the review is generally who'd know/paid the amount; a
-// future Budget tab is what actually aggregates this across stops (see CLAUDE.md).
+// amount spent + currency + who paid) — reads whatever's currently staged in the form and writes
+// it all together, only when "Save review" is clicked (see the ratingUI comment above for why this
+// moved off save-per-field). Adding a rating, writing review text, or logging an amount spent is
+// treated as strong enough evidence the stop actually happened to auto-mark it done — there's no
+// separate manual "done" checkbox anymore. This only ever sets done:true, never back to false:
+// clearing a review to empty shouldn't silently un-mark a stop someone already confirmed visiting.
+// `currency` defaults to the trip's own but is freely overridable (e.g. paying in local cash);
+// `convertedAmount` is resolved to meta.defaultCurrency HERE, once, at save time — not left for the
+// Budget tab to re-derive live on every render, which would mean the displayed conversion silently
+// drifts as exchange rates move, rather than reflecting the rate at the time the money was actually
+// spent. Same convention `saveExpense()` (Budget tab) now follows for manual expenses. `paidByEmail`
+// is independent of `email` (whose review this is) — whoever logs the review isn't necessarily who
+// actually paid, same "who paid" field the manual-expense modal has, defaulting to the reviewer but
+// freely overridable. The Budget tab aggregates this across stops, preferring paidByEmail and
+// falling back to email for entries saved before this field existed (see CLAUDE.md). `updatedAt`
+// backs the "Last saved" label.
 async function saveDayStopRating(routeId, stopIdx, opts){
   opts = opts || {};
   const key = routeStopKey(routeId, stopIdx);
@@ -4653,8 +4788,16 @@ async function saveDayStopRating(routeId, stopIdx, opts){
   const note = document.getElementById('day-stop-review')?.value || '';
   const spentRaw = document.getElementById('day-stop-spent')?.value;
   const spent = spentRaw === '' || spentRaw == null ? null : Number(spentRaw);
+  const currency = document.getElementById('day-stop-spent-currency')?.value || null;
+  const paidByEmail = document.getElementById('day-stop-paid-by')?.value || null;
   const uid = currentUser.uid;
-  const ratingEntry = { value, note, spent, email: currentUser.email };
+  const defaultCur = tripData?.meta?.defaultCurrency || null;
+  let convertedAmount = null;
+  if(spent != null && defaultCur && currency && currency !== defaultCur){
+    const rate = await getRate(currency, defaultCur);
+    convertedAmount = rate != null ? Math.round(spent * rate * 100) / 100 : null;
+  }
+  const ratingEntry = { value, note, spent, currency, convertedAmount, paidByEmail, email: currentUser.email, updatedAt: Date.now() };
   const patch = { ratings: { [uid]: ratingEntry } };
   if(value != null || note.trim() || spent != null) patch.done = true;
   await db.collection('tripNotes').doc(currentTripId).set({ routeStops: { [key]: patch } }, { merge: true });
@@ -4688,12 +4831,21 @@ document.getElementById('days-content').addEventListener('click', e=>{
     renderDaysLevel2And3();
     return;
   }
+  // Star clicks only update the staged, unsaved value shown in the UI — actual persistence is the
+  // "Save review" button below, same as the review text/spent/paid-by fields. See the note on
+  // saveDayStopRating() for why this whole panel moved off save-per-field.
   const starBtn = e.target.closest('.star-btn');
   if(starBtn){
     const val = Number(starBtn.dataset.star);
     const container = document.getElementById('day-stop-star-rating');
     container.dataset.value = val;
     container.querySelectorAll('.star-btn').forEach(b=>b.classList.toggle('filled', Number(b.dataset.star) <= val));
+    return;
+  }
+  if(e.target.id === 'day-stop-save'){
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
     saveDayStopRating(daysSelectedRouteId, daysSelectedStopIndex, { rerender: true });
     return;
   }
@@ -4708,12 +4860,356 @@ document.getElementById('days-content').addEventListener('change', async e=>{
   if(e.target.classList.contains('js-wishlist-check')){
     await saveWishlistCheck(e.target.dataset.placeId, e.target.dataset.idx, e.target.checked);
     e.target.closest('.wishlist-item').classList.toggle('checked', e.target.checked);
-    return;
   }
-  if(daysSelectedStopIndex === null) return;
-  if(e.target.id === 'day-stop-review' || e.target.id === 'day-stop-spent'){
-    await saveDayStopRating(daysSelectedRouteId, daysSelectedStopIndex, { rerender: e.target.id === 'day-stop-spent' });
+  // day-stop-review/spent/paid-by no longer autosave on change — "Save review" above is the only
+  // write trigger for this panel now.
+});
+
+// ---------- Budget tab ----------
+// Combines two independent data sources into one view, never duplicating either: manual
+// tripData.expenses[] entries (freestanding costs not tied to a specific stop visit) and every
+// non-null tripNotes.routeStops[key].ratings[uid].spent already captured during Day-by-day
+// execution (see the schema note on routeStops above). The latter are read-only here — editing one
+// happens back at the Day-by-day stop (#day-stop-spent), never a second copy to keep in sync.
+
+function expenseCategoryLabel(c){ return c ? formatCat(c) : 'Uncategorized'; }
+
+function formatMoney(amount, currency){
+  const n = Math.round(amount * 100) / 100;
+  return currency ? `${n} ${currency}` : `${n}`;
+}
+
+// Every stop-linked spend entry across every route, resolved with enough context (place, category,
+// which day) to fold into the same stats as manual expenses. A route can be assigned to more than
+// one day (explicit alternates — see "Routing / planning" in CLAUDE.md), and there's no record of
+// which specific day a visit actually happened on, so this picks the earliest assigned day as a
+// best-effort label rather than leaving it fully unlabeled.
+function collectStopLinkedExpenses(){
+  const out = [];
+  (tripData.routes||[]).forEach(route=>{
+    const { places } = normalizeRoute(route);
+    const assignedDays = (tripData.days||[]).filter(d=>(d.assignedRoutes||[]).includes(route.id));
+    const day = assignedDays[0] || null;
+    places.forEach((s, si)=>{
+      const key = routeStopKey(route.id, si);
+      const ratings = tripNotes.routeStops?.[key]?.ratings || {};
+      const place = (tripData.places||[]).find(p=>p.id===s.placeId);
+      Object.values(ratings).forEach(r=>{
+        if(r.spent == null) return;
+        // `r.currency` is the currency the stop's spend was actually logged in (may differ from
+        // the trip default — see saveDayStopRating()); an entry saved before that field existed
+        // has no `currency` at all, in which case it's assumed to already be in the trip's
+        // default (the original convention). `convertedAmount` is resolved into the trip's
+        // default currency, preferring what was already computed and stored at save time
+        // (saveDayStopRating()) over a live re-fetch — renderBudget()'s conversion pass only
+        // live-fetches when this is still null (no conversion needed, or save-time conversion
+        // wasn't possible).
+        const currency = r.currency || tripData.meta?.defaultCurrency || null;
+        const needsConversion = !!(currency && tripData.meta?.defaultCurrency && currency !== tripData.meta.defaultCurrency);
+        out.push({
+          source: 'stop', key,
+          amount: r.spent, currency,
+          convertedAmount: needsConversion ? (r.convertedAmount ?? null) : r.spent,
+          category: place?.cat?.[0] || null,
+          note: '', date: day?.date || null, dayLabel: day?.label || null,
+          // paidByEmail is who actually paid (independent of who logged the review), falling back
+          // to the reviewer's email only for entries saved before that field existed. Real bug:
+          // `r.paidByEmail || r.email || null` collapsed an explicit `paidByEmail: null`
+          // (Unspecified) with "the key was never set at all" and fell back to the reviewer's
+          // email either way — the exact same undefined-vs-null mistake already fixed in
+          // populatePaidBySelect()'s history, just made again here. `'paidByEmail' in r` is the
+          // fix: if the key exists at all (even as null), trust it as-is — Unspecified correctly
+          // stays unattributed (renderBudgetStats()'s byPerson loop already skips falsy
+          // paidByEmail) instead of silently crediting the reviewer.
+          paidByEmail: ('paidByEmail' in r) ? r.paidByEmail : (r.email || null),
+          placeName: place?.name || '(unknown place)'
+        });
+      });
+    });
+  });
+  return out;
+}
+
+async function renderBudget(){
+  const defaultCur = tripData?.meta?.defaultCurrency || null;
+  const manual = (tripData.expenses||[]).map((e,idx)=>({ ...e, source:'manual', idx }));
+  const stopLinked = collectStopLinkedExpenses();
+  const all = [...manual, ...stopLinked];
+
+  // Resolve every entry's amount in the trip's default currency where possible — needed to combine
+  // mixed-currency entries into one set of totals. Both manual expenses (saveExpense()) and
+  // stop-linked spend (saveDayStopRating(), via collectStopLinkedExpenses()) now compute and store
+  // this conversion once, at save time, so it reflects the rate when the money was actually spent
+  // rather than drifting with whatever rate happens to be current each time Budget is opened —
+  // this loop only hits getRate() live as a fallback, for entries that don't have a resolved
+  // convertedAmount yet (saved before this existed, or the save-time rate fetch failed). Skipped
+  // entirely (raw amount used as-is) when the trip has no defaultCurrency set — same
+  // "conversion is display-only, skipped without a default" rule Places price conversion follows.
+  await Promise.all(all.map(async e=>{
+    if(!defaultCur || !e.currency || e.currency === defaultCur){ e.convertedAmount = e.amount; return; }
+    if(e.convertedAmount != null) return;
+    const rate = await getRate(e.currency, defaultCur);
+    e.convertedAmount = rate != null ? e.amount * rate : e.amount;
+  }));
+
+  renderBudgetList(all, defaultCur);
+  renderBudgetStats(all, defaultCur);
+}
+
+function renderBudgetList(all, defaultCur){
+  const el = document.getElementById('budget-list');
+  if(!all.length){ el.innerHTML = '<p class="hint">No expenses logged yet.</p>'; return; }
+  const sorted = all.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  el.innerHTML = sorted.map(e=>{
+    const showConverted = defaultCur && e.currency && e.currency !== defaultCur && e.convertedAmount != null;
+    const convertedStr = showConverted ? ` <span class="place-meta">(≈ ${formatMoney(e.convertedAmount, defaultCur)})</span>` : '';
+    const place = e.source === 'manual' ? (tripData.places||[]).find(p=>p.id===e.relatedPlaceId) : null;
+    const placeName = e.source === 'stop' ? e.placeName : place?.name;
+    const bits = [];
+    if(e.date) bits.push(e.date);
+    if(e.dayLabel) bits.push(e.dayLabel);
+    if(placeName) bits.push(placeName);
+    if(e.paidByEmail) bits.push(`paid by ${e.paidByEmail}`);
+    return `<div class="card" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+      <div>
+        <div class="place-name">${formatMoney(e.amount, e.currency)}${convertedStr}
+          ${e.category ? `<span class="tag">${formatCat(e.category)}</span>` : ''}
+          ${e.source==='stop' ? '<span class="tag">From Day-by-day</span>' : ''}
+        </div>
+        ${bits.length ? `<div class="place-meta">${bits.join(' · ')}</div>` : ''}
+        ${e.note ? `<div class="place-general-note">${e.note}</div>` : ''}
+      </div>
+      ${e.source==='manual' ? `<div style="display:flex; gap:6px; flex-shrink:0;">
+        <button type="button" class="btn-small js-exp-edit" data-idx="${e.idx}">Edit</button>
+        <button type="button" class="btn-small js-exp-delete" data-idx="${e.idx}">Delete</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// D.M.YY + a weekday abbreviation — short enough to sit next to a day label ("Day 1, 24.8.26,
+// Mon") without blowing out the stats column's width. Builds the Date from local y/m/d parts, not
+// new Date(iso) — same pattern todayIso()/isoDatesInRange() use, since parsing the ISO string
+// directly interprets it as UTC and can shift the weekday by a day near midnight (see
+// isoDatesInRange()'s comment for the same bug this avoids).
+function shortDateWithWeekday(iso){
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return `${d}.${m}.${String(y).slice(-2)}, ${WEEKDAY_ABBR[dt.getDay()]}`;
+}
+
+// A stop-linked entry already carries its route's day label; a manual expense only has a raw
+// `date` — resolve that date against tripData.days so the two don't split into separate buckets
+// for what's actually the same calendar day (e.g. a manual expense dated "2026-09-01" needs to
+// land in the same "Day 1" bucket as a stop visited that day, not its own "2026-09-01" bucket).
+// The date/weekday is appended whenever a date is known, so "Day 1" alone doesn't force a reader
+// to cross-reference the Day-by-day tab to know which actual date that is.
+function budgetDayLabel(e){
+  if(!e.date) return e.dayLabel || 'Unassigned';
+  const day = (tripData.days||[]).find(d=>d.date===e.date);
+  const label = e.dayLabel || day?.label || null;
+  const dateStr = shortDateWithWeekday(e.date);
+  return label ? `${label}, ${dateStr}` : dateStr;
+}
+
+function renderBudgetStats(all, defaultCur){
+  const el = document.getElementById('budget-stats');
+  const amt = e => e.convertedAmount != null ? e.convertedAmount : e.amount;
+  const total = all.reduce((sum,e)=>sum+amt(e), 0);
+
+  const byCategory = {};
+  all.forEach(e=>{ const k = e.category || 'uncategorized'; byCategory[k] = (byCategory[k]||0) + amt(e); });
+
+  const byDay = {};
+  all.forEach(e=>{ const k = budgetDayLabel(e); byDay[k] = (byDay[k]||0) + amt(e); });
+
+  // Same "uncategorized" pattern as byCategory above — an entry with no paidByEmail (an explicit
+  // "Unspecified" choice, or a manual expense that never set one) used to just vanish from this
+  // breakdown entirely (`if(!e.paidByEmail) return;`), silently excluding real spend from the
+  // total-by-person view rather than surfacing it as its own visible bucket.
+  const byPerson = {};
+  all.forEach(e=>{ const k = e.paidByEmail || 'unspecified'; byPerson[k] = (byPerson[k]||0) + amt(e); });
+
+  const realistic = tripData?.meta?.preferences?.budget?.realistic;
+  const overBudget = realistic != null && total > realistic;
+
+  const rows = (obj, formatKey) => Object.entries(obj).sort((a,b)=>b[1]-a[1])
+    .map(([k,v])=>`<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${formatKey(k)}</span><span class="mono">${formatMoney(v, defaultCur)}</span></div>`).join('');
+
+  el.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:10px;">
+      <h3 style="margin:0;">Total spent: ${formatMoney(total, defaultCur)}</h3>
+      ${realistic != null ? `<span style="color:${overBudget?'var(--red)':'var(--ink-soft)'}; font-size:.85rem;">${overBudget ? 'Over' : 'Within'} realistic budget of ${formatMoney(realistic, defaultCur)}</span>` : ''}
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:20px; margin-top:16px;">
+      <div><div class="pane-title" style="margin-bottom:6px;">By category</div>${rows(byCategory, expenseCategoryLabel) || '<p class="hint">—</p>'}</div>
+      <div><div class="pane-title" style="margin-bottom:6px;">By day</div>${rows(byDay, k=>k) || '<p class="hint">—</p>'}</div>
+      <div><div class="pane-title" style="margin-bottom:6px;">Paid by</div>${rows(byPerson, k=>k==='unspecified'?'Unspecified':k) || '<p class="hint">—</p>'}</div>
+    </div>
+  `;
+}
+
+let editingExpenseIdx = null;
+let currentExpenseCat = null;
+
+function populateExpenseCurrencySelect(){
+  const sel = document.getElementById('exp-currency');
+  const defaultCur = tripData?.meta?.defaultCurrency || null;
+  const priority = [defaultCur].filter(Boolean);
+  const rest = CURRENCY_CODES.filter(c=>!priority.includes(c));
+  const codes = [...new Set([...priority, ...rest])];
+  sel.innerHTML = codes.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+
+function renderExpenseCatChips(){
+  const el = document.getElementById('exp-cat-chips');
+  const customCatsUsed = [...new Set((tripData?.expenses||[]).map(e=>e.category).filter(c=>c && !CATEGORY_PRESETS.includes(c)))];
+  const allCats = [...new Set([...CATEGORY_PRESETS, ...customCatsUsed])];
+  el.innerHTML = allCats.map(c=>{
+    const active = currentExpenseCat === c;
+    return `<button type="button" class="cat-chip ${active?'active':''}" data-cat="${c}">${formatCat(c)}</button>`;
+  }).join('');
+}
+document.getElementById('exp-cat-chips').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  const c = btn.dataset.cat;
+  // Single-select, unlike a place's cat[] chips — one expense is one category, not several tags —
+  // so clicking the already-active chip clears it instead of leaving it stuck on.
+  currentExpenseCat = currentExpenseCat === c ? null : c;
+  renderExpenseCatChips();
+});
+
+function populateExpensePlaceSelect(selectedId){
+  const sel = document.getElementById('exp-place');
+  const places = tripData?.places || [];
+  sel.innerHTML = '<option value="">None</option>' + places.map(p=>`<option value="${p.id}">${p.city ? `${p.city} — ` : ''}${p.name}</option>`).join('');
+  sel.value = selectedId || '';
+}
+
+// One-off fetch of the trip's participants (same pattern as openCollabModal()) — neither the
+// expense modal nor the Day-by-day stop rating keep a persistent client-side copy of this, it's
+// only needed while whichever select is actually being shown. Shared by both, since "who paid" is
+// the same question and the same dropdown in either place.
+// `selectedEmail` distinguishes three states, not two: `undefined` ("never set" — a brand-new
+// expense, or a stop rating that's never touched paid-by) defaults to the current user; `null` or
+// `''` (an explicit, previous choice of "Unspecified") must stay Unspecified; a string is that
+// person's email. Collapsing undefined/null together with `selectedEmail || currentUser.email`
+// meant "Unspecified" could never actually stick — saving it, then re-rendering, read the stored
+// null back indistinguishably from "never set" and silently reselected the current user again.
+//
+// The Day-by-day call site fires this fire-and-forget on every single render of a stop's detail
+// view (opening it, then again after every save that triggers a rerender — including a paid-by
+// change itself). Each call awaits a real network fetch, so choosing "Unspecified" — which saves
+// and immediately re-renders — can easily have the *original* call (issued when the stop first
+// opened, still defaulted to the current user) resolve *after* the newer one from the save, and
+// silently overwrite the correct "Unspecified" selection with the stale default. Symptom: picking
+// Unspecified behaves exactly like the current user got reselected. `paidBySelectSeq` guards
+// against this — each call claims the next number for its selectId *before* awaiting anything, and
+// only applies its result if it's still the most recent call issued for that select by the time its
+// fetch resolves; a superseded call just no-ops instead of clobbering.
+const paidBySelectSeq = {};
+async function populatePaidBySelect(selectId, selectedEmail){
+  const mySeq = (paidBySelectSeq[selectId] = (paidBySelectSeq[selectId]||0) + 1);
+  let participants = [currentUser.email];
+  try{
+    const tripDoc = await db.collection('trips').doc(currentTripId).get();
+    if(tripDoc.exists && tripDoc.data().participants) participants = tripDoc.data().participants;
+  }catch(err){ console.warn('Could not load participants for paid-by list:', err); }
+  if(paidBySelectSeq[selectId] !== mySeq) return; // a newer call has since taken over this select
+  // Queried only after the await, not before: the Day-by-day call site fires this off
+  // fire-and-forget from inside the HTML-building function, before that HTML has actually been
+  // inserted into the DOM — grabbing the element up front would capture null (or a stale one from
+  // a previous render) and throw once this resolves. By now the caller's synchronous
+  // `innerHTML = ...` assignment has always already run (same-thread JS can't interleave that with
+  // this pending await), so the element is guaranteed current — unless the user has since
+  // navigated elsewhere, in which case it's just gone and there's nothing to populate.
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Unspecified</option>' + participants.map(email=>
+    `<option value="${email}">${email}${email===currentUser.email?' (you)':''}</option>`).join('');
+  sel.value = selectedEmail !== undefined ? (selectedEmail || '') : currentUser.email;
+}
+
+async function openExpenseModal(idx){
+  editingExpenseIdx = idx;
+  const e = idx!=null ? tripData.expenses[idx] : {};
+  document.getElementById('exp-modal-title').textContent = idx!=null ? 'Edit expense' : 'Add expense';
+  document.getElementById('exp-amount').value = e.amount ?? '';
+  populateExpenseCurrencySelect();
+  document.getElementById('exp-currency').value = e.currency || tripData?.meta?.defaultCurrency || '';
+  currentExpenseCat = e.category || null;
+  renderExpenseCatChips();
+  // Defaults to today for a brand-new expense (the common case — logging something just paid
+  // for), but stays freely editable, and an edit of an existing expense keeps its own date as-is
+  // rather than jumping to today.
+  document.getElementById('exp-date').value = idx!=null ? (e.date || '') : todayIso();
+  populateExpensePlaceSelect(e.relatedPlaceId);
+  document.getElementById('exp-note').value = e.note || '';
+  document.getElementById('exp-error').textContent = '';
+  await populatePaidBySelect('exp-paid-by', e.paidByEmail);
+  document.getElementById('expense-modal').classList.remove('hidden');
+  document.getElementById('exp-amount').focus();
+}
+document.getElementById('btn-add-expense').addEventListener('click', ()=>openExpenseModal(null));
+document.getElementById('exp-cancel').addEventListener('click', ()=>document.getElementById('expense-modal').classList.add('hidden'));
+document.getElementById('expense-modal').addEventListener('click', e=>{
+  if(e.target.id === 'expense-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)){
+    document.getElementById('expense-modal').classList.add('hidden');
   }
+});
+
+async function saveExpense(){
+  const errEl = document.getElementById('exp-error');
+  errEl.textContent = '';
+  const amountVal = document.getElementById('exp-amount').value;
+  if(amountVal === '' || Number(amountVal) <= 0){ errEl.textContent = 'Enter an amount greater than 0.'; return; }
+  const amount = Number(amountVal);
+  const currency = document.getElementById('exp-currency').value || null;
+  // Resolved to meta.defaultCurrency once, here, at save time — same reasoning as
+  // saveDayStopRating()'s convertedAmount: the displayed conversion should reflect the rate at the
+  // time the expense was actually logged, not whatever rate is current whenever someone later opens
+  // the Budget tab. renderBudget() still live-fetches as a fallback for entries saved before this
+  // existed, or where this fetch failed.
+  const defaultCur = tripData?.meta?.defaultCurrency || null;
+  let convertedAmount = null;
+  if(defaultCur && currency && currency !== defaultCur){
+    const rate = await getRate(currency, defaultCur);
+    convertedAmount = rate != null ? Math.round(amount * rate * 100) / 100 : null;
+  }
+  const expense = {
+    id: editingExpenseIdx!=null ? tripData.expenses[editingExpenseIdx].id : 'exp-' + Date.now().toString(36),
+    amount, currency, convertedAmount,
+    category: currentExpenseCat,
+    date: document.getElementById('exp-date').value || null,
+    paidByEmail: document.getElementById('exp-paid-by').value || null,
+    relatedPlaceId: document.getElementById('exp-place').value || null,
+    note: document.getElementById('exp-note').value.trim()
+  };
+  const expenses = tripData.expenses ? tripData.expenses.slice() : [];
+  if(editingExpenseIdx!=null) expenses[editingExpenseIdx] = expense;
+  else expenses.push(expense);
+  await db.collection('tripData').doc(currentTripId).update({ expenses });
+  tripData.expenses = expenses;
+  document.getElementById('expense-modal').classList.add('hidden');
+  renderBudget();
+}
+document.getElementById('exp-save').addEventListener('click', saveExpense);
+
+async function deleteExpense(idx){
+  if(!confirm('Delete this expense?')) return;
+  const expenses = tripData.expenses.slice();
+  expenses.splice(idx, 1);
+  await db.collection('tripData').doc(currentTripId).update({ expenses });
+  tripData.expenses = expenses;
+  renderBudget();
+}
+
+document.getElementById('budget-list').addEventListener('click', e=>{
+  const editBtn = e.target.closest('.js-exp-edit');
+  if(editBtn){ openExpenseModal(Number(editBtn.dataset.idx)); return; }
+  const delBtn = e.target.closest('.js-exp-delete');
+  if(delBtn){ deleteExpense(Number(delBtn.dataset.idx)); }
 });
 
 // ---------- Coordinate fixer (OpenStreetMap Nominatim) ----------
