@@ -275,7 +275,36 @@ tripData/{tripId}                  — trip content, fetched once per open, over
       // untouched, no separate cleanup needed anywhere else.
     ],
     events: [ { name, certainty, desc } ],
-    budget: [ { category, estimate, note } ]
+    expenses: [   // Phase (post-Phase-7 roadmap) — freestanding manual costs not tied to a
+                  // specific stop visit. Renamed from the original schema's always-empty
+                  // `budget: []` stub, which nothing ever read or wrote — see "Budget tab" below
+                  // for how this combines with tripNotes.routeStops[key].ratings[uid].spent
+                  // (execution-time spend, already in the schema) into one view.
+      {
+        id, amount, currency,   // currency defaults to meta.defaultCurrency but is independently
+                                 // editable per expense — a manual expense might legitimately be
+                                 // logged in a different currency than the trip default (e.g. a
+                                 // flight paid at home, or cash spent in the destination's own
+                                 // currency — see routeStops[key].ratings[uid].currency below,
+                                 // which now follows the same pattern).
+        convertedAmount,   // amount converted into meta.defaultCurrency via the Frankfurter API
+                           // (see "Stack"), resolved ONCE at save time (saveExpense()) rather than
+                           // re-derived live every time the Budget tab renders — so the displayed
+                           // conversion reflects the exchange rate when the expense was actually
+                           // logged, not whatever rate happens to be current whenever someone
+                           // later opens Budget. null when currency matches meta.defaultCurrency
+                           // (nothing to convert), no defaultCurrency is set, or the rate fetch
+                           // failed at save time — renderBudget() falls back to a live getRate()
+                           // call only in that last case.
+        category,   // single free-form tag, reusing CATEGORY_PRESETS + custom exactly like
+                    // places[].cat — but singular, not an array: one expense is one category,
+                    // not several tags the way a place can be
+        note, date,          // date is an ISO string, optional
+        paidByEmail,         // optional — who paid, defaults to currentUser at entry time but not
+                              // enforced afterward
+        relatedPlaceId       // optional — links the expense to a places[] entry
+      }
+    ]
   }
 
 tripNotes/{tripId}                 — user-editable live state, listened via onSnapshot
@@ -315,7 +344,7 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
                   // already confirmed. `note` (a separate shared execution-time note) was dropped
                   // entirely — see ratings[uid].note below.
         ratings: {
-          [uid]: { value, note, spent, email }
+          [uid]: { value, note, spent, currency, convertedAmount, paidByEmail, email }
           // value: 1-5 (stars) — a DIFFERENT scale from places[].wantRating's 1-10, deliberately:
           // wantRating answers "how much do I want to go", this answers "how was it", and forcing
           // them onto the same scale would conflate two different questions. Rendered as a
@@ -326,13 +355,28 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
           // Used to be two separate fields (this personal one, plus a shared non-personal `note`
           // on the routeStops entry itself) that read as duplicates with no clear reason to pick
           // one over the other; the shared field was removed and this one relabeled "review" in
-          // the UI. spent: plain number or null, assumed to be in meta.defaultCurrency (no
-          // per-entry currency field, same convention as interstop item cost) — logged per-person
-          // since whoever fills in the review is generally who'd know/paid the amount; the Budget
-          // tab (still just a stub, see "Current status") is what will actually aggregate this
-          // across stops — this is just where the raw number is captured for now. email: denormalized
-          // at write time — there's no uid→email lookup for anyone but currentUser, so without
-          // this there'd be no way to label whose rating (or spend) is whose
+          // the UI. spent: plain number or null — logged per-person since whoever fills in the
+          // review is generally who'd know the amount; the Budget tab (see "Budget tab") is what
+          // actually aggregates this across stops. currency: the currency `spent` was actually
+          // entered in — REVISED from an earlier version where this field didn't exist at all and
+          // `spent` was simply assumed to be in meta.defaultCurrency; a `<select>` next to the
+          // amount now lets it be logged in local currency instead (e.g. paying in DKK on a trip
+          // whose default is EUR), defaulting to the trip's own currency but listing the stop's
+          // place's local currency (via city→country) right after it for convenience. Absent on
+          // entries saved before this shipped — still treated as meta.defaultCurrency, the
+          // original convention. convertedAmount: `spent` converted into meta.defaultCurrency,
+          // resolved ONCE at save time (saveDayStopRating(), via the Frankfurter API — see
+          // "Stack") rather than re-derived live every time Budget renders, same reasoning and
+          // same field name as tripData.expenses[].convertedAmount above — so a review logged in
+          // DKK today keeps showing today's rate even if rates move before anyone opens Budget.
+          // null when currency matches the default, no default is set, or the rate fetch failed.
+          // paidByEmail: who actually paid — independent of who's logging the review (the
+          // reviewer isn't necessarily the payer), a <select> of trip participants defaulting to
+          // the current user, same "paid by" field and default the Budget tab's manual-expense
+          // modal has. Added after `spent` shipped, so older entries won't have it — Budget's
+          // collectStopLinkedExpenses() falls back to `email` (the reviewer) when absent. email:
+          // denormalized at write time — there's no uid→email lookup for anyone but currentUser, so
+          // without this there'd be no way to label whose rating (or spend) is whose
         }
       }
     },  // Day-by-day tab execution state (Phase 5) — see "Day-by-day" below
@@ -837,28 +881,67 @@ time):
 
   **Execution controls, revised from the first version of this view**: a manual "Mark as done"
   checkbox and two separate free-text fields (a shared "Note" plus a personal "rating note") have
-  been replaced with just rating + review. "Your rating" is five full-width, large-tap-target star
-  buttons (`starRatingHtml()`, `.star-rating`/`.star-btn`) — mobile-first, and deliberately a 1-5
-  scale, not 1-10: this answers "how was it" post-visit, a different question from
-  `places[].wantRating`'s 1-10 "how much do I want to go", so reusing that scale would have
-  conflated the two. "Your review" is one `<textarea>` (`#day-stop-review`) — the one place to write
-  text about a visited stop, replacing both of the old fields. A third field, "Amount spent here"
-  (`#day-stop-spent`, plain number, labeled with `meta.defaultCurrency` when set), captures
-  `ratings[uid].spent` — the raw number the future Budget tab will aggregate (see schema above).
-  `done` is no longer a checkbox at all: `saveDayStopRating()` sets it to `true` automatically the
-  moment a star is clicked, the review has non-empty text, or a spent amount is entered (never back
-  to `false` — clearing a review can't silently un-mark a stop), and a small read-only
-  "✓ Marked done" line shows when it's set. A star click writes and re-renders immediately (so the
-  filled-star count and the ✓ line update); editing the review text writes on `change` (blur)
-  without re-rendering, so a mid-sentence edit doesn't lose textarea focus/cursor position — same
-  tradeoff already used for other text-field autosaves in this app; the spent field does re-render
-  on `change` since it's a single blur-triggered number entry, not continuous typing. A read-only
-  line still lists any other participants' ratings (via the denormalized `email`), rendered as
-  filled-star characters rather than a raw number, plus their spent amount when they've logged one.
-  All writes go through
+  been replaced with rating + review + spent + paid-by, all staged locally and written together by
+  one **"Save review" button** — revised again from an initial save-per-field version (see below for
+  why). "Your rating" is five full-width, large-tap-target star buttons (`starRatingHtml()`,
+  `.star-rating`/`.star-btn`) — mobile-first, and deliberately a 1-5 scale, not 1-10: this answers
+  "how was it" post-visit, a different question from `places[].wantRating`'s 1-10 "how much do I
+  want to go", so reusing that scale would have conflated the two. Clicking a star only updates the
+  staged value shown on screen, nothing is written yet. "Your review" is one `<textarea>`
+  (`#day-stop-review`). "Amount spent here" (`#day-stop-spent`, plain number, plus a currency
+  `<select>` next to it, `#day-stop-spent-currency`) captures `ratings[uid].spent`/`currency` —
+  aggregated by the Budget tab (see "Budget tab" below). **Revised to add the currency picker**:
+  originally `spent` had no currency field at all and was simply assumed to be
+  `meta.defaultCurrency`; a trip to Copenhagen with an EUR default but cash spent in DKK had no way
+  to record that correctly. The currency select needs no network fetch (unlike paid-by's
+  participants), so it's built directly in the synchronous render rather than a post-render populate
+  call — no race-condition risk there. Defaults to the trip's own currency, with the stop's place's
+  local currency (via city→country, the same lookup Places' price field already uses) surfaced right
+  after it for the common case of paying in local cash — one click away, never silently substituted
+  for the trip default. Saving resolves the amount into `meta.defaultCurrency` once, via the
+  Frankfurter API, storing the result as `convertedAmount` (see the routeStops schema note above) —
+  an "≈ X" hint shows underneath when the two currencies differ. "Paid by" (`#day-stop-paid-by`, a
+  `<select>` of the trip's participants,
+  defaulting to the current user) captures `ratings[uid].paidByEmail` — independent of who's logging
+  the review, since the reviewer isn't necessarily who actually paid; shares its options-fetch with
+  the Budget tab's manual-expense modal via one function, `populatePaidBySelect(selectId,
+  selectedEmail)`. `selectedEmail` distinguishes `undefined` ("never set" — default to the current
+  user) from `null`/`''` (an explicit past choice of "Unspecified", which must stay Unspecified, not
+  silently fall back to you) from an actual email — collapsing the first two with a bare `||` was a
+  real bug caught in testing, since a stored `null` and a genuinely-never-set field are meaningfully
+  different states here.
+
+  **"Save review" replaced save-per-field after two rounds of race-condition bugs.** The original
+  design wrote each field the instant it changed (a star click, a blur on the review textarea, a
+  paid-by change) and re-rendered/re-fetched participants every time. Two real, user-reported bugs
+  came out of this: first, `populatePaidBySelect()` grabbed its `<select>` element *before* awaiting
+  the participants fetch, which could capture `null` (the element didn't exist in the DOM yet on a
+  fresh render) and throw once the fetch resolved — fixed by querying the DOM only after the
+  `await`. Second, and worse: because *every* interaction fired its own fetch-then-write-then-rerender
+  cycle, picking "Unspecified" (which saves and instantly re-renders) could have the *original* fetch
+  — issued when the stop first opened, before any choice was made, still defaulting to the current
+  user — resolve *after* the newer one and silently overwrite the correct selection. A per-selectId
+  sequence guard (`paidBySelectSeq`, discarding a stale call's result once a newer one has been
+  issued) fixed that specific race, but it was still just patching one symptom of "this whole panel
+  re-fetches and re-renders on every keystroke and click." The actual fix was removing the trigger
+  entirely: nothing in this panel writes to Firestore anymore except the "Save review" button, so
+  there's only ever one write-then-rerender cycle per explicit save, not one per field interaction —
+  the whole class of overlapping-async-cycle races is gone, not just the one instance of it that got
+  reported. A "Last saved \<date/time\>" label (`formatPublishedAt()`, reused from the Publish
+  modal's staleness indicator — see "Static/public sharing") sits next to the button, reading
+  "Not yet saved" until `ratings[uid].updatedAt` (new field, set on every save) has a value, so it's
+  never ambiguous whether your edits actually went through.
+
+  `done` is no longer a checkbox at all: `saveDayStopRating()` sets it to `true` automatically on
+  save if the value/note/spent being saved is non-empty (never back to `false` — clearing a review
+  can't silently un-mark a stop), and a small read-only "✓ Marked done" line shows when it's set. A
+  read-only line still lists any other participants' ratings (via the denormalized `email`, plus
+  "(paid by X)" when `paidByEmail` differs), rendered as filled-star characters rather than a raw
+  number, plus their spent amount when they've logged one. All writes go through
   `db.collection('tripNotes').doc(currentTripId).set({routeStops:{[key]:{...}}}, {merge:true})` —
-  same merge-write pattern already used for `tripNotes.places[id].note`. "← Back to route" returns
-  to Level 2.
+  same merge-write pattern already used for `tripNotes.places[id].note`. Navigating away (Prev/Next,
+  Back to route, switching stops) without saving discards whatever's staged — no unsaved-changes
+  warning, a deliberate scope cut rather than an oversight. "← Back to route" returns to Level 2.
 
   **Wishlist as a checklist**: when `opts.interactiveWishlist` is set (Level 3 only — Level 2 and
   every other `placeDetailHtml()` caller still get the plain comma-joined summary), a place's
@@ -879,6 +962,73 @@ auto-navigation into the next undone stop's detail on entry, only Prev/Next once
 Level 3. A real transition leg between two routes assigned to the same day is shown as a plain
 divider, not an editable/fillable gap. `tripData.places[placeId].done`/`ratings` (place-level,
 route-independent tracking, separate from `routeStops`) stays unbuilt.
+
+## Budget tab
+
+✅ **Implemented.** Combines two independent data sources into one view, without ever duplicating
+either: manual `tripData.expenses[]` entries (see schema above) plus every non-null
+`tripNotes.routeStops[key].ratings[uid].spent` already captured during Day-by-day execution
+(`collectStopLinkedExpenses()`) — a stop-linked entry is read-only here, tagged "From Day-by-day";
+editing one happens back at the stop itself (`#day-stop-spent`), never a second copy to keep in
+sync. A stop-linked entry's category comes from its place's first `cat[]` tag, its currency comes
+from `ratings[uid].currency` (falling back to `meta.defaultCurrency` for entries saved before that
+field existed — see the routeStops schema note above; **revised** from the original "always
+`meta.defaultCurrency`, no per-entry currency field" convention once Day-by-day gained its own
+currency picker), its paid-by comes from `ratings[uid].paidByEmail` — `'paidByEmail' in r ? r.paidByEmail :
+(r.email || null)`, trusting the key as-is (even `null`) if it's present at all and only falling
+back to the reviewer's `email` when the key is genuinely absent (entries saved before the field
+existed). **Real bug, reported as "picking Unspecified in Day-by-day shows the reviewer as payer
+in Budget"**: this used to be `r.paidByEmail || r.email || null` — the exact same
+undefined-vs-null collapse already fixed once in `populatePaidBySelect()`'s history (see "Day-by-day
+tab"), made again here independently. An explicit `paidByEmail: null` (Unspecified) is falsy, so
+`||` fell through to `r.email` and silently credited the reviewer as if they'd paid — verified in
+the database the field really was `null`, so a Day-by-day repro that looked "still broken" after
+several rounds of fixes there turned out to be a completely different bug in the Budget tab's own
+aggregation, not a regression of the earlier fix. Its day comes from whichever day the stop's route
+is assigned to (`tripData.days[].assignedRoutes`). Since a
+route can be assigned to more than one day (explicit alternates — see "Routing / planning"), and
+there's no record of which specific day a visit actually happened, this picks the earliest assigned
+day as a best-effort label rather than leaving the entry unlabeled — a known simplification, not a
+guarantee.
+
+**Combined stats** (`renderBudgetStats()`): total spent, by category, by day, and a simple paid-by
+total per person, all computed after resolving every entry into `meta.defaultCurrency` where
+possible. **Revised**: both `saveExpense()` (manual expenses) and `saveDayStopRating()` (stop-linked
+spend, since it gained its own currency field) now resolve and store a `convertedAmount` once, at
+save time, via the Frankfurter API — see the schema notes above — so `renderBudget()`'s own
+`getRate()` call is only a fallback for whichever entries don't already have one (saved before this
+existed, or the save-time fetch failed), not the primary path for every render. Conversion is
+skipped entirely (raw amounts summed as-is) when the trip has no `defaultCurrency` set, same
+"display-only, skipped without a default" rule Places price
+conversion already follows. Total is compared against `meta.preferences.budget.realistic` when set,
+with an "Over"/"Within" flag. **By-person grouping buckets a missing/`null` `paidByEmail` under its
+own visible "Unspecified" row** (same pattern as `byCategory`'s "Uncategorized" bucket) rather than
+silently dropping that spend out of the "Paid by" breakdown entirely — the original version did
+`if(!e.paidByEmail) return;`, which excluded real spend from the view rather than surfacing it as
+its own bucket; still correctly excluded from any *person's* total, just no longer invisible from
+the breakdown as a whole. **By-day grouping resolves a manual expense's raw `date` against
+`tripData.days` to find that date's day label** (`budgetDayLabel()`) rather than bucketing by the
+literal date string — found as a real bug while testing: a manual expense dated the same day as a
+stop visit was landing in its own `"2026-09-01"` bucket instead of merging into `"Day 1"` alongside
+the stop-linked entries for that day, since the two entry types started out keyed differently
+(`dayLabel` vs raw `date`). Fixed by resolving both through the same day-label lookup.
+
+**Manual expense modal** (`#expense-modal`, `openExpenseModal()`): amount, currency (select,
+`meta.defaultCurrency` prioritized first same pattern as the place price-currency select),
+category (single-select chip picker — deliberately different from a place's multi-select `cat[]`
+chips, since one expense is one category, not several tags; clicking an already-active chip clears
+it instead of toggling to a second selection), date, related place (a `<select>` of the trip's
+places, not free-text search — simpler and unambiguous since multiple places can share a name),
+paid-by (a `<select>` of the trip's participants, fetched one-off via
+`populateExpensePaidBySelect()` — same one-off `trips/{tripId}.get()` pattern as
+`openCollabModal()`, defaulting to `currentUser.email`), and a note. Only amount is required (must
+be greater than 0). Save/delete write directly to `tripData.expenses` and re-render the tab; no
+draft/preview step, consistent with how places/routes are edited directly once a trip exists.
+
+The vestigial `budget: []` field from the original schema doc (never read or written by any code)
+is dropped in favor of `expenses[]`, updated at all three trip-creation sites (`loadTrip()`'s
+not-found fallback, New/Copy trip save, and `startOwnTripFromShare()`) — see the schema section
+above.
 
 ## Map + list view (Phase 6)
 
@@ -1021,6 +1171,14 @@ of re-declaring them from scratch. A "Copy link" button next to the published UR
 `navigator.clipboard.writeText()` (same pattern as the AI-instruction copy button elsewhere), with a
 "Could not copy automatically" fallback alert if the browser blocks it. Un-publishing deletes the
 `publicTrips/{tripId}` doc; the source trip is completely untouched by either action.
+
+Both sides of a share link show **when** that snapshot was published (`formatPublishedAt()`, off
+the same `updatedAt` millis timestamp already written on every publish) — the publisher sees
+"Published \<date/time\>" in the Publish modal's status line, and the viewer sees the same line
+under the trip header on the `?share=` page. Since a share link is a point-in-time copy, not a live
+mirror (see above — this is also the direct answer to "why don't newly-added ratings show up on an
+already-shared link": they don't, until the trip is published again), this doubles as an at-a-glance
+staleness indicator for both sides rather than requiring either party to guess.
 
 A fourth checkbox, **"Let viewers start their own trip from this"** (`allowCopy` on the published
 doc), is independent of the three content ones — it controls whether the *read-only viewer* gets a
@@ -1209,6 +1367,10 @@ multi-tab support alongside it, since both people may have the app open in more 
   `publicTrips/{tripId}` (openly readable, checkboxes for what to include, `tripNotes.documents`
   never included) and `?share=tripId` renders it read-only with no sign-in — see "Static/public
   sharing" above
+- ✅ Budget tab: combines manual `tripData.expenses[]` entries with live-read
+  `tripNotes.routeStops[key].ratings[uid].spent` (the latter read-only, editable back at the
+  Day-by-day stop) into one list plus totals by category/day/paid-by, compared against
+  `meta.preferences.budget.realistic` — see "Budget tab" above
 - ⬜ Everything else in this file is planned, not built
 
 An earlier draft of `index.html` (superseded) had a trip picker, tabs, and per-place done+note
