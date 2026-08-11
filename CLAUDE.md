@@ -34,8 +34,15 @@ update the schema section in the same pass.
   exhaustive — always manually overridable). Conversion is display-only and skipped entirely if
   the trip has no `defaultCurrency` set or the rate fetch fails.
 - **AI generation**: three tiers, all producing the same JSON shape (see "AI generation model" below).
-- **File storage** (not yet enabled): Firebase Storage, gated behind the Blaze plan — see
-  "Billing" section before enabling.
+- **Documents**: a trip's own Google Drive folder (not Firebase Storage) — listed live via the
+  Drive API v3 (`files.list`, a plain restricted API key, no OAuth needed since the folder is
+  publicly link-shared) and optionally uploaded to via a session-scoped Google OAuth token
+  (Firebase's `GoogleAuthProvider` requesting an extra `drive.file` scope at sign-in). See
+  "Documents tab" — this is what keeps file storage entirely off the Blaze plan.
+- **File storage** (Firebase Storage, not used): superseded by the Google Drive approach above for
+  documents — see "Documents tab" and "File uploads" below. Gated behind the Blaze plan; see
+  "Billing" section if it's ever needed for something Drive doesn't cover (e.g. place photos a user
+  uploads directly rather than a Wikipedia lookup).
 
 ## Security model
 
@@ -108,6 +115,11 @@ tripData/{tripId}                  — trip content, fetched once per open, over
       summary,
       defaultCurrency,        // ISO code, e.g. "EUR" — trip-level (shared by all participants),
                                // not per-user. Optional; conversion display is skipped without it.
+      docsFolderId,           // Google Drive folder ID backing the Documents tab (see "Documents
+                               // tab" below) — extracted from a pasted folder share link via
+                               // extractDriveFolderId(), editable in "Edit trip details". null/
+                               // unset disables folder browsing/upload there (manual links still
+                               // work); the folder itself must be shared "Anyone with the link".
       preferences: {
         freeText,              // general notes not covered by the structured fields below
         numPeople,
@@ -315,7 +327,6 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
         done,   // reserved for Phase 5 (execution mode) — not exposed in the Places tab UI,
                 // which is a planning/catalog view, not a "have we done this" tracker
         note,   // general planning note (e.g. "book ahead"), editable from the Places tab
-        linkedDocs: [ docId, ... ],
         ratings: { [uid]: { value, note } },  // per-person rating+note, Phase 5 — keyed by Firebase
                                                // uid, entered during execution mode, distinct from
                                                // the plan-time `note` above. Still unbuilt — place-
@@ -349,7 +360,7 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
           // wantRating answers "how much do I want to go", this answers "how was it", and forcing
           // them onto the same scale would conflate two different questions. Rendered as a
           // full-width row of 5 tappable stars (mobile-first), not a number input. A compact
-          // per-person star string (`stopRatingSummaryHtml()`) also shows in the Day-by-day Level 2
+          // average-rating summary (`stopRatingSummaryHtml()`) also shows in the Day-by-day Level 2
           // list next to each stop, so a rating is visible without drilling into Level 3.
           // note: this person's own review — the ONE place to write text about a visited stop.
           // Used to be two separate fields (this personal one, plus a shared non-personal `note`
@@ -380,10 +391,22 @@ tripNotes/{tripId}                 — user-editable live state, listened via on
         }
       }
     },  // Day-by-day tab execution state (Phase 5) — see "Day-by-day" below
+    // Two kinds of entry share this map, distinguished by `source` — see "Documents tab" below
+    // for the full design (a trip's own Google Drive folder, listed live, layered with this
+    // Firestore metadata; no Storage/Blaze involved).
     documents: {
-      [docId]: { title, type, confirmationNumber, url, note, createdAt }
-      // url points to an external link (Drive/email/etc.) today; could point to a Storage
-      // download URL later if file uploads are enabled — same field either way.
+      [docId]: {
+        source,   // "manual" for a plain pasted link, absent/undefined for metadata on a file
+                  // that's actually listed live from the trip's Drive folder (meta.docsFolderId)
+        title, type, url,   // only meaningful for source:"manual" — a Drive-backed entry's name/
+                             // type/view-link always come from the live Drive listing itself
+                             // (never stored, so they can't go stale if the file is renamed),
+                             // fetched by docId = the Drive file's own id
+        note, confirmationNumber,   // shared by both kinds — free text either way
+        relatedPlaceId,   // optional — links this document to a places[] entry (see
+                           // "Documents tab"); many documents can point at the same place
+        createdAt
+      }
     }
   }
 
@@ -834,10 +857,22 @@ a persistent "+ Add routes" button instead: a checklist modal (`#add-routes-moda
 Copy-trip places-checklist pattern — `renderCopyPlacesChecklist()`/`renderAddRoutesChecklist()`) of
 every route not already on the selected day, grouped by city, with Select all/Select none; "Add
 selected" appends the checked route ids to that day's `assignedRoutes` (immediate write, no
-draft/save step) and closes. Only unassigned routes are listed, so there's nothing to dedup against
-— a route already on the day was never offered as a checkbox in the first place. **Ordering**, for
-a day with more than one route, still happens here too (up/down buttons on the Level 2 picker),
-since that's the one place a day's full route list is visible together — this part didn't change.
+draft/save step) and closes. Only unassigned-to-*this*-day routes are listed, so there's nothing to
+dedup against — a route already on the day was never offered as a checkbox in the first place. A
+route already assigned to one or more *other* days can still be listed and added here too (explicit
+alternates are a supported pattern, see below), but is flagged ("Already on: Day 1, Day 3") and
+sorted to the bottom of its city group, so a deliberate re-add is still possible without it reading
+as an accidental double-booking or crowding out the untouched options. **Ordering**, for a day with
+more than one route, still happens here too (up/down buttons on the Level 2 picker), since that's
+the one place a day's full route list is visible together — this part didn't change.
+
+**Checkbox layout, same bug class as `.publish-check-row`'s history**: `.ai-preview-row` (the
+checklist-row class shared by this modal, the Copy Trip places checklist, and both AI-generation
+preview checklists) had its `display:flex` silently lose to the pre-existing
+`.modal-box label{display:block}` rule on specificity, stacking each checkbox above its row content
+instead of beside it — reported as "checkbox is above, looks weird" on this specific checklist, but
+the bug affected all four checklists that share the class. Fixed once, at the CSS root, by
+requalifying as `.modal-box .ai-preview-row{...}` (0,2,0), same fix pattern as before.
 
 ✅ **Implemented**, as a three-level drill-down rather than all days rendered at once (deliberately
 — there's no reason to load a whole trip's worth of checklists/maps when only one day matters at a
@@ -858,9 +893,19 @@ time):
   place's own note, wishlist, links — the same richness `renderPlaces()` shows, factored out so the
   two don't duplicate markup), passing the route's per-stop planning note as `opts.routeNote` so it
   renders directly beneath the place's own note (see note-differentiation below); completed stops
-  get a `.stop-done` modifier (moss background + ✓) plus a compact per-person star string
-  (`stopRatingSummaryHtml()`, `.mini-stars`) next to the checkmark for anyone who's rated that stop
-  — a rating is visible from the list without drilling into Level 3; and *every* stop row is
+  get a `.stop-done` modifier (moss background + ✓) plus a compact rating summary
+  (`stopRatingSummaryHtml()`, `.mini-stars`) next to the checkmark — average rating and review
+  count (e.g. "★ 4.5 (2 reviews)"). **Revised twice**: v1 showed every participant's individual star
+  string side by side, which didn't scale past a couple of reviewers (a route with several people
+  rating every stop turned into a wall of stars). v2 replaced that with the average/count plus an
+  explicit "✓ You reviewed" / "you haven't reviewed yet" flag for the current user — closer, but the
+  flag text read as too wordy for a compact list row, and the *positive* case ("you reviewed") isn't
+  actually worth saying anything about — your own review, once given, doesn't need a prompt. Final
+  version: only the not-yet-reviewed case renders anything extra, as a lone hollow star (`☆`,
+  tooltip "You haven't reviewed this yet") right after the average — nothing appears once the
+  current user has rated it. Keyed off `currentUser.uid`, simply omitted on the unauthenticated
+  share view (`renderShareView()`, where `currentUser` is null) either way — a rating is visible
+  from the list without drilling into Level 3; and *every* stop row is
   clickable into Level 3 — not just ones with coordinates, since marking something done doesn't need
   a map marker (a click inside a link or button within the row is excluded from that, so opening a
   place's link doesn't also navigate into Level 3). Price conversion for these rows uses a separate
@@ -934,10 +979,21 @@ time):
 
   `done` is no longer a checkbox at all: `saveDayStopRating()` sets it to `true` automatically on
   save if the value/note/spent being saved is non-empty (never back to `false` — clearing a review
-  can't silently un-mark a stop), and a small read-only "✓ Marked done" line shows when it's set. A
-  read-only line still lists any other participants' ratings (via the denormalized `email`, plus
-  "(paid by X)" when `paidByEmail` differs), rendered as filled-star characters rather than a raw
-  number, plus their spent amount when they've logged one. All writes go through
+  can't silently un-mark a stop), and a small read-only "✓ Marked done" line shows when it's set.
+
+  **Every review for this stop renders as its own card** (`reviewCardHtml()`, `.review-card`) below
+  the save button — **revised from a single "other participants" line** that excluded the current
+  user's own rating entirely (no visible confirmation a save had landed beyond the "Last saved"
+  timestamp above), joined everyone else with `<br>`, and silently dropped the currency a spend was
+  actually logged in. Each card: name (`"You"` for the current user's own, sorted first, so seeing
+  your own save land doesn't require scanning past everyone else's) plus star rating on one line;
+  the review text on its own full-width line below (`.review-text`); a spend badge
+  (`.spent-badge`, mustard background) floated to the right of the name/stars row showing the
+  amount in whatever currency it was actually logged in, the converted amount alongside when that
+  differs from `meta.defaultCurrency` (e.g. "100 DKK (≈ 13.4 EUR)"), and who paid; and a
+  last-saved date/time line (`formatPublishedAt()`, same formatter used elsewhere) at the bottom.
+  A card with no review text or no spend just omits those lines rather than showing empty ones. All
+  writes go through
   `db.collection('tripNotes').doc(currentTripId).set({routeStops:{[key]:{...}}}, {merge:true})` —
   same merge-write pattern already used for `tripNotes.places[id].note`. Navigating away (Prev/Next,
   Back to route, switching stops) without saving discards whatever's staged — no unsaved-changes
@@ -1020,8 +1076,9 @@ chips, since one expense is one category, not several tags; clicking an already-
 it instead of toggling to a second selection), date, related place (a `<select>` of the trip's
 places, not free-text search — simpler and unambiguous since multiple places can share a name),
 paid-by (a `<select>` of the trip's participants, fetched one-off via
-`populateExpensePaidBySelect()` — same one-off `trips/{tripId}.get()` pattern as
-`openCollabModal()`, defaulting to `currentUser.email`), and a note. Only amount is required (must
+`populatePaidBySelect(selectId, selectedEmail)` — shared with the Day-by-day stop rating's own
+paid-by field, same one-off `trips/{tripId}.get()` pattern as `openCollabModal()`, defaulting to
+`currentUser.email`), and a note. Only amount is required (must
 be greater than 0). Save/delete write directly to `tripData.expenses` and re-render the tab; no
 draft/preview step, consistent with how places/routes are edited directly once a trip exists.
 
@@ -1029,6 +1086,103 @@ The vestigial `budget: []` field from the original schema doc (never read or wri
 is dropped in favor of `expenses[]`, updated at all three trip-creation sites (`loadTrip()`'s
 not-found fallback, New/Copy trip save, and `startOwnTripFromShare()`) — see the schema section
 above.
+
+## Documents tab
+
+✅ **Implemented**, revised from the original Phase-7-era plan of one-manual-link-per-document.
+Instead, a trip can point at a single shared **Google Drive folder** and the app lists whatever's
+actually in it — discussed and confirmed with the user as a way to avoid Firebase Storage/Blaze
+entirely (see "Billing" and "File uploads" below).
+
+**Setup**: "Edit trip details" gets a "Documents folder" field — paste a Drive folder share link
+(or a bare folder ID; `extractDriveFolderId()` accepts either) into `meta.docsFolderId`. The folder
+must be shared "Anyone with the link can view" — same trust model the app already assumed for any
+Drive link a user pasted in before this existed. Clearing the field disables folder browsing/upload
+for that trip (existing document notes aren't deleted) — manual links (see below) work either way,
+with or without a folder set.
+
+**Reading the folder**: Drive API v3 `files.list` (`listDriveFolder()`, `q: "'<folderId>' in
+parents and trashed = false"`) called with a plain **API key** (`DRIVE_API_KEY`, a placeholder
+constant near `firebaseConfig` until filled in), no OAuth — the folder's already publicly
+link-shared, so a key is all `files.list` needs. This key is not a secret the way the AI provider
+key is (see "AI generation model") — it only grants read access to a folder already set to "anyone
+with the link," so it's safe to embed client-side, same trust model as `firebaseConfig`. Must be
+locked down in Google Cloud Console (same project as Firebase): **API-restricted** to Drive API
+only, **referrer-restricted** to the app's real origin(s) + localhost. No billing/Blaze requirement
+for read calls at this scale. **Not live-synced** — Drive's API has no free push-based equivalent
+to Firestore's `onSnapshot`, so this is a fetch-on-demand mirror of the folder (on opening the
+Documents tab, or "🔄 Refresh"), not instant the way the rest of this app's Firestore-backed data
+is; a file someone adds directly in Drive shows up on next open/refresh. Cached per folder
+(`docsListCache`/`docsListCacheFolderId`) so switching tabs back and forth doesn't re-hit the API
+every time.
+
+**Writing (upload) — tried, removed for v1.** The original design requested an extra OAuth scope
+(`drive.file`) on the existing Google sign-in and uploaded via Drive API's `files.create`
+(multipart), entirely client-side, no backend. Two real bugs came out of testing it against a real
+account: `signInWithPopup()` could resolve successfully but return no usable access token for an
+already-signed-in account (Google silently reusing the session instead of re-prompting for the new
+scope — worked around with `provider.setCustomParameters({ prompt: 'consent' })`), and then a
+second, browser-level issue — the upload button opened the native file chooser *before* requesting
+Drive permission, and browsers refuse a popup opened immediately after a file chooser closes
+(`auth/popup-blocked`, "window.open blocked due to active file chooser"), which needed reordering
+so permission was requested first. After both fixes, upload still failed unreliably enough in
+practice that the user asked to drop it rather than keep debugging it — **uploading a file directly
+in Google Drive, then having it show up in the app's live listing, works fine and is good enough
+for v1.** All upload code (`ensureDriveAccessToken()`, `uploadFileToDriveFolder()`, the "⬆ Upload
+file" button) has been removed; only the read side (`listDriveFolder()`) remains. Revisiting upload
+is a fair future call if it turns out to matter enough to debug further — flagged here rather than
+silently forgotten.
+
+**The merged list** (`renderDocuments()` → `renderDocsList()`): every live Drive file plus every
+manual link, one card each (`.doc-row`). A `tripNotes.documents[docId]` entry is a manual link if
+it carries `source:"manual"` (title/type/url stored directly there); otherwise, if its key matches
+a file id from the live listing, it's metadata (`note`/`confirmationNumber`/`relatedPlaceId`)
+layered onto that file — the file's own name/mimeType/view-link always come from the live listing,
+never stored, so they can't go stale if the file is renamed in Drive. A metadata entry for a file
+no longer in the listing (deleted from Drive, or the folder changed) simply doesn't render — a
+known simplification, not handled specially. Each row shows a type icon (`docTypeIcon()`, by
+mimeType), a **"Preview" toggle** for previewable types (`docIsPreviewable()` — PDFs, images, and
+native Google Docs/Sheets/Slides) that inserts an `<iframe>` pointed at Drive's own embeddable
+viewer (`https://drive.google.com/file/d/<id>/preview`) directly into the row — genuinely displayed
+in-app, not just linked out, reusing Drive's own renderer rather than building a PDF viewer from
+scratch — plus a "View in Drive ↗" / "Open ↗" fallback link either way. "Edit details" opens one
+shared modal (`#doc-modal`) for both kinds — a Drive file's edit hides the title/type/url fields
+(not this app's to rename), a manual link's edit shows them; only manual links get a "Delete"
+button, since deleting a Drive file isn't something a metadata-edit action in this app should do —
+that happens in Drive itself, outside the app, consistent with "we mirror the folder, we don't
+manage it."
+
+**Related place — settable from either side.** From the Documents tab: a `<select>` of the trip's
+places (`populateDocPlaceSelect()`, same pattern as the Budget tab's expense-place select) sets
+`relatedPlaceId` on either kind of document. Many documents can point at the same place (a hotel's
+booking confirmation, a receipt, a floor-plan PDF all linked to one place) — the relationship is
+document → place, not the reverse, so there's no per-place list of document ids to keep in sync; a
+place's documents are found by filtering. ✅ **From the place side too**: the place Add/Edit modal
+has a "Related documents" checklist (`renderPlaceDocsChecklist()`, reusing `getMergedDocsList()` —
+the same Drive+manual merge the Documents tab itself renders from, seeded with whatever's in
+`docsListCache`; if the Documents tab hasn't been opened yet this session that cache is empty and
+only manual links show there — a known simplification, not a live re-fetch triggered from the place
+modal). Saving a place diffs the checked state against each document's current `relatedPlaceId` and
+writes only what actually changed (`{relatedPlaceId: place.id}` for newly checked, `{relatedPlaceId:
+null}` for unchecked-but-was-linked) in one merge write — a Drive file with no prior metadata entry
+at all just gets a fresh minimal one.
+
+**Documents show as ordinary place links, everywhere a place does.** `relatedDocLinksHtml(placeId)`
+— shared by `placeDetailHtml()` and the Places tab's own row renderer (`renderPlaces()`, which
+predates `placeDetailHtml()` and never got migrated onto it, so it needed the same fix applied
+separately) — renders each linked document in the same link row as Map/other links, so it's one
+click away wherever the place shows up: the Places tab, Routes, and Day-by-day while actually
+executing the plan, not just from the Documents tab. A Drive-linked entry has no friendly filename
+available in this context (that only exists in the Documents tab's live-fetched listing, not in
+`tripNotes.documents`), so it's labeled generically **"View in Drive ↗"** rather than guessing a
+name that could be wrong — the user confirmed this is preferable to the earlier-considered
+alternative (denormalizing a name snapshot that could drift). A manual link already has a real
+title, so that's used instead. The Drive URL itself is constructed directly from the doc id
+(`https://drive.google.com/file/d/<id>/view`), no live listing needed for this to work.
+
+`tripNotes.documents` is (and remains) the one thing **never** included in a published trip
+snapshot (see "Static/public sharing") — confirmation numbers and any other document metadata stay
+private always, regardless of what a Publish modal checkbox says.
 
 ## Map + list view (Phase 6)
 
@@ -1233,18 +1387,23 @@ included**: without `tripNotes` in the snapshot, falls back to the same compact
 `tripNotes` present, renders full per-stop detail via `placeDetailHtml()` plus a done-checkmark
 (`stopRatingSummaryHtml()` — the same compact star-string helper Day-by-day Level 2 uses) and the
 actual review text (`shareStopReviewHtml()`, a new helper — `stopRatingSummaryHtml()` alone only
-ever showed star counts, not what anyone actually wrote, which was the whole point of choosing to
-share reviews at all).
+ever showed an average rating and review count, not what anyone actually wrote, which was the whole
+point of choosing to share reviews at all).
 
-## File uploads (Phase 8, not yet enabled)
+## File uploads (Phase 8, mostly superseded by "Documents tab")
 
-Documents currently store a *link* to a file kept elsewhere (Drive, email, etc.), not the file
-itself — Firebase Storage requires the Blaze plan for any usage as of Feb 3, 2026 (previously
-had its own free tier; see "Billing"). When enabled: real PDF upload via Firebase Storage,
-gated by the same allowlist/participants rules pattern as Firestore; the `documents.url` field
-then just points at a Storage download URL instead of an external link — no schema change needed,
-same field either way. Location *photos* don't need this at all — a plain `imageUrl` field
-pointing at any public image works without touching Storage or billing.
+Real document upload **is** implemented — via the trip's own Google Drive folder (see "Documents
+tab"), not Firebase Storage, so it never needed the Blaze plan at all. Firebase Storage requires
+Blaze for any usage as of Feb 3, 2026 (previously had its own free tier; see "Billing"), which was
+the actual reason this phase was deferred in the first place — the Drive approach sidesteps that
+requirement entirely rather than waiting on it.
+
+What's still genuinely unbuilt: a place *photo* the user uploads directly (as opposed to the
+existing Wikipedia auto-lookup) — that would still most naturally be a plain `imageUrl` field
+pointing at any public image, and doesn't need Drive's folder-listing machinery since a photo
+belongs to one specific place, not a trip-wide document pool. Not started; Storage/Blaze remains
+the fallback path if Drive ever turns out to be the wrong fit for that specific case (e.g. wanting
+tighter access control than "anyone with the folder link").
 
 ## Preloaded location data (Phase 9, stretch)
 
@@ -1371,6 +1530,14 @@ multi-tab support alongside it, since both people may have the app open in more 
   `tripNotes.routeStops[key].ratings[uid].spent` (the latter read-only, editable back at the
   Day-by-day stop) into one list plus totals by category/day/paid-by, compared against
   `meta.preferences.budget.realistic` — see "Budget tab" above
+- ✅ Documents tab: a trip's own Google Drive folder (`meta.docsFolderId`), listed live via a
+  restricted API key (no Blaze) and inline Preview via Drive's own embeddable viewer; manual
+  (non-Drive) links work independent of a folder being set. In-app upload was tried and removed
+  after real-account testing (see "Documents tab" above) — dropping a file into the Drive folder
+  directly and seeing it in the app's listing is the v1 workflow. Documents can be linked to places
+  from either side (the Documents tab's own relate-a-place picker, or a "Related documents"
+  checklist on the place Add/Edit modal), and show as ordinary clickable links wherever that place
+  renders (Places tab, Routes, Day-by-day) — see "Documents tab" above
 - ⬜ Everything else in this file is planned, not built
 
 An earlier draft of `index.html` (superseded) had a trip picker, tabs, and per-place done+note
