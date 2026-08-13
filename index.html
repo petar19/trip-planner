@@ -227,6 +227,29 @@
   .ai-preview-row .place-meta{margin-top:1px;}
   #coords-pending-count{font-family:'JetBrains Mono',monospace; font-size:.72rem; margin-left:4px;}
 
+  /* AI place-import card review (#ai-card-review-modal) — an optional, bigger secondary dialog
+     that stacks on top of the checklist preview (#ai-step-preview) for a one-at-a-time look at
+     each candidate before deciding. Decisions sync back into the checklist's own checkboxes, so
+     the checklist stays the single source of truth for what actually gets imported. */
+  .ai-card-review-box{width:640px; max-width:94vw;}
+  #ai-card-content{margin:14px 0;}
+  .ai-card-photo{width:100%; max-height:320px; object-fit:cover; border-radius:12px; display:block;}
+  .ai-card-photo-blank{width:100%; height:170px; border-radius:12px; border:1px dashed var(--line); background:var(--paper-raised); color:var(--ink-soft); display:flex; align-items:center; justify-content:center; font-size:.85rem;}
+  #ai-card-controls{display:flex; gap:10px; flex-wrap:wrap;}
+  /* Decision buttons carry their color always, not just once selected — the user wants the
+     choice legible before deciding, not just after. .active (the currently recorded decision for
+     the card on screen) fills the button solid instead of just outlining it. */
+  .ai-card-decision{flex:1 1 130px; padding:14px 10px; font-size:.95rem; text-align:center;}
+  #ai-card-reject{border-color:var(--red); color:var(--red);}
+  #ai-card-maybe{border-color:var(--mustard); color:var(--mustard);}
+  #ai-card-approve{border-color:var(--moss); color:var(--moss);}
+  #ai-card-reject.active{background:var(--red); color:#fff;}
+  #ai-card-maybe.active{background:var(--mustard); color:#fff;}
+  #ai-card-approve.active{background:var(--moss); color:#fff;}
+  @media (max-width: 600px){
+    .ai-card-review-box{width:100%; max-width:100vw;}
+  }
+
   /* Category chips */
   .cat-picker{display:flex; flex-wrap:wrap; gap:6px;}
   /* One assigned-route row per line (label chip + reorder/remove buttons) rather than side-by-side
@@ -285,7 +308,6 @@
     <button data-tab="days">Day-by-day</button>
     <button data-tab="budget">Budget</button>
     <button data-tab="documents">Documents</button>
-    <button data-tab="manage">Manage / Import</button>
   </nav>
 
   <main id="main-content" class="hidden">
@@ -300,6 +322,7 @@
           <button class="btn-small" id="btn-copy-trip">Copy this trip…</button>
           <button class="btn-small" id="btn-manage-collaborators">Manage collaborators…</button>
           <button class="btn-small" id="btn-publish-trip">Publish / Share…</button>
+          <button class="btn-small" id="btn-import-export">Import / Export…</button>
           <button id="btn-delete-trip" style="background:var(--red); color:white; border:none; padding:8px 14px; border-radius:8px; cursor:pointer; font-weight:600; font-size:.85rem;">Delete this trip</button>
         </div>
       </div>
@@ -338,7 +361,7 @@
     <section class="panel" id="p-routes">
       <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
         <button class="primary" id="btn-add-route">+ Add route manually</button>
-        <button id="btn-generate-routes" class="btn-small">✨ Generate routes with AI</button>
+        <button id="btn-generate-routes" class="btn-small">✨ Generate routes…</button>
       </div>
       <div id="routes-list"></div>
     </section>
@@ -369,7 +392,6 @@
       <p id="docs-error" style="color:var(--red); font-size:.85rem; min-height:1em;"></p>
       <div id="docs-list"></div>
     </section>
-    <section class="panel" id="p-manage"><p class="mono">Not built yet.</p></section>
   </main>
 </div>
 
@@ -730,7 +752,10 @@
     </div>
 
     <div id="ai-step-preview" class="hidden">
-      <p class="hint" style="margin-bottom:10px;">Review before importing — likely duplicates are unchecked by default.</p>
+      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <p class="hint" style="margin:0;">Review before importing — likely duplicates are unchecked by default.</p>
+        <button type="button" class="btn-small" id="ai-open-card-review">🖼 Review as cards</button>
+      </div>
       <div id="ai-preview-list"></div>
       <div class="modal-actions">
         <button class="btn-cancel" id="ai-cancel-3">Cancel</button>
@@ -740,15 +765,41 @@
   </div>
 </div>
 
+<!-- ============ AI PLACE CARD REVIEW (opens on top of ai-modal) ============ -->
+<div id="ai-card-review-modal" class="modal-backdrop hidden">
+  <div class="modal-box ai-card-review-box">
+    <h3>Review places</h3>
+    <p class="hint" id="ai-card-progress"></p>
+    <div id="ai-card-content"></div>
+    <div id="ai-card-controls">
+      <button type="button" class="btn-small" id="ai-card-prev">← Prev</button>
+      <button type="button" class="btn-small ai-card-decision" id="ai-card-reject">✕ Reject</button>
+      <button type="button" class="btn-small ai-card-decision" id="ai-card-maybe">? Maybe</button>
+      <button type="button" class="btn-small ai-card-decision" id="ai-card-approve">✓ Approve</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-save" id="ai-card-done">Done — back to list</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ AI ROUTE GENERATION ============ -->
 <div id="routes-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="width:700px;">
-    <h3>Generate routes with AI</h3>
+    <h3>Generate routes</h3>
 
     <div id="routes-step-setup">
       <div id="routes-no-cities-hint" class="hidden" style="background:var(--mustard-soft); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.85rem;">
         This trip has no cities set yet. <button type="button" class="btn-small" id="routes-open-edit-trip" style="padding:3px 10px;">Edit trip details</button>
       </div>
+      <div class="cat-picker" id="routes-gen-method" style="margin-bottom:14px;">
+        <button type="button" class="cat-chip active" data-method="ai">✨ AI (paste-back)</button>
+        <button type="button" class="cat-chip" data-method="algo">🧮 Algorithm (automatic, no AI)</button>
+      </div>
+      <p class="hint" id="routes-algo-hint" style="margin:-8px 0 14px; display:none;">Clusters places
+        geographically and orders each route via nearest-neighbor + local cleanup — no AI call, runs
+        instantly. Doesn't yet balance total want-rating across routes or estimate stay durations —
+        see CLAUDE.md for the v1 scope.</p>
       <div class="modal-grid">
         <div>
           <label for="routes-city">City</label>
@@ -767,12 +818,12 @@
           <label for="routes-stops-per-route">Target stops per route (optional)</label>
           <input id="routes-stops-per-route" type="number" min="1" placeholder="e.g. 5">
         </div>
-        <div>
+        <div id="routes-field-travel-methods">
           <label>Travel methods (optional)</label>
           <div id="routes-travel-methods" class="cat-picker"></div>
         </div>
 
-        <div class="span-2">
+        <div class="span-2" id="routes-field-notes">
           <label for="routes-notes">Anything specific to this batch (optional)</label>
           <textarea id="routes-notes" placeholder="e.g. keep mornings light, group museums together, avoid too much backtracking"></textarea>
         </div>
@@ -826,6 +877,11 @@
             <label for="route-editor-label">Route label</label>
             <input id="route-editor-label" placeholder="e.g. Old Town Highlights">
           </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px;">
+          <button type="button" class="btn-small" id="btn-route-calc-travel">🧭 Calculate times &amp; distances</button>
+          <span id="route-calc-status" class="place-meta"></span>
         </div>
 
         <div id="route-editor-stops" style="margin-top:18px;"></div>
@@ -1051,6 +1107,47 @@
   </div>
 </div>
 
+<!-- ============ IMPORT / EXPORT (JSON) ============ -->
+<div id="importexport-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:640px;">
+    <h3>Import / Export</h3>
+
+    <h4 style="margin:0 0 6px;">Export this trip</h4>
+    <p class="hint">Builds a JSON snapshot of this trip — for backup, or to hand-import into
+      another trip later.</p>
+    <label class="publish-check-row"><span>Places</span><input type="checkbox" id="export-include-places" checked></label>
+    <label class="publish-check-row"><span>Routes &amp; Days</span><input type="checkbox" id="export-include-routes" checked></label>
+    <label class="publish-check-row"><span>Ratings &amp; reviews</span><input type="checkbox" id="export-include-reviews"></label>
+    <div style="display:flex; gap:8px; margin:10px 0; flex-wrap:wrap;">
+      <button type="button" class="btn-small" id="export-build">Build export</button>
+      <button type="button" class="btn-small hidden" id="export-copy">Copy to clipboard</button>
+      <button type="button" class="btn-small hidden" id="export-download">Download .json</button>
+    </div>
+    <textarea id="export-output" readonly class="hidden" style="min-height:110px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+
+    <hr style="margin:22px 0; border:none; border-top:1px solid var(--line);">
+
+    <h4 style="margin:0 0 6px;">Import into this trip</h4>
+    <p class="hint">Paste a JSON export from this app. Days are never imported — they're
+      auto-generated from this trip's own date range — only Places and Routes are.</p>
+    <textarea id="import-input" placeholder="{ &quot;places&quot;: [...], ... }" style="min-height:110px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+    <div style="display:flex; gap:8px; margin:8px 0;">
+      <button type="button" class="btn-small" id="import-validate">Validate</button>
+    </div>
+    <div id="import-error" style="color:var(--red); font-size:.82rem; min-height:1em; white-space:pre-line;"></div>
+    <div id="import-options" class="hidden">
+      <label class="publish-check-row"><span id="import-places-label">Places</span><input type="checkbox" id="import-include-places"></label>
+      <label class="publish-check-row"><span id="import-routes-label">Routes</span><input type="checkbox" id="import-include-routes"></label>
+      <label class="publish-check-row"><span id="import-reviews-label">Ratings &amp; reviews</span><input type="checkbox" id="import-include-reviews"></label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="importexport-close">Close</button>
+      <button class="btn-save hidden" id="import-go">Import selected</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ START OWN TRIP FROM SHARE ============ -->
 <div id="start-own-trip-modal" class="modal-backdrop hidden">
   <div class="modal-box">
@@ -1138,6 +1235,19 @@ db.enablePersistence({synchronizeTabs: true}).catch(err=>{
 // "Anyone with the link" for the listing to work at all. Same trust model as firebaseConfig above.
 // =========================================================================
 const DRIVE_API_KEY = 'AIzaSyA2bA4pyGfCnBYpeNDgZKiSpc1b7rfE8qo';
+
+// =========================================================================
+// OpenRouteService API key — for real leg distance/time in the route editor (see CLAUDE.md
+// "Routing / planning" → OpenRouteService integration). Free at https://openrouteservice.org/dev/
+// (sign up → Dashboard → Request a token → "Standard" — no billing/card needed). Free tier is
+// ~2000 requests/day, 40/minute; this app calls the Matrix API (one call per distinct travel
+// profile used in a route, not one call per leg) through a shared rate-limited queue
+// (orsRateLimitedFetch()) to stay well under that. Like DRIVE_API_KEY above, safe to embed
+// client-side — it's a usage-metered key with hard free-tier caps, not a secret whose leak enables
+// billing abuse the way an AI provider key would.
+// =========================================================================
+const ORS_API_KEY = 'PASTE_YOUR_ORS_API_KEY_HERE';
+function orsApiKeyConfigured(){ return !!ORS_API_KEY && !ORS_API_KEY.startsWith('PASTE_'); }
 
 // Accepts either a full folder share link (https://drive.google.com/drive/folders/<id>?usp=...)
 // or a bare folder ID pasted directly — Edit Trip Details' "Documents folder" field takes either,
@@ -1897,6 +2007,173 @@ document.getElementById('publish-unpublish').addEventListener('click', async ()=
   if(!confirm('Un-publish this trip? The shared link will stop working.')) return;
   await db.collection('publicTrips').doc(currentTripId).delete();
   openPublishModal();
+});
+
+// ---------- Import / Export (JSON) ----------
+// Was previously the "Manage / Import" tab (a stub, never built). Replaced with this dialog on
+// the Overview tab, mirroring the Publish/Share modal's checkbox pattern for both directions
+// rather than a dedicated tab — export builds a downloadable JSON snapshot (same shape as a
+// Publish snapshot, no publicTrips write involved), import parses a pasted snapshot and lets the
+// user pick which detected sections to merge into the live trip. Days are deliberately never
+// merged on import (same reasoning as Copy Trip not copying days — they're bound to a specific
+// date range and syncDaysToTripDates() regenerates them fresh already).
+function openImportExportModal(){
+  document.getElementById('export-include-places').checked = true;
+  document.getElementById('export-include-routes').checked = true;
+  document.getElementById('export-include-reviews').checked = false;
+  document.getElementById('export-output').value = '';
+  document.getElementById('export-output').classList.add('hidden');
+  document.getElementById('export-copy').classList.add('hidden');
+  document.getElementById('export-download').classList.add('hidden');
+  document.getElementById('import-input').value = '';
+  document.getElementById('import-error').textContent = '';
+  document.getElementById('import-options').classList.add('hidden');
+  document.getElementById('import-go').classList.add('hidden');
+  importParsedData = null;
+  document.getElementById('importexport-modal').classList.remove('hidden');
+}
+function closeImportExportModal(){ document.getElementById('importexport-modal').classList.add('hidden'); }
+document.getElementById('btn-import-export').addEventListener('click', openImportExportModal);
+document.getElementById('importexport-close').addEventListener('click', closeImportExportModal);
+document.getElementById('importexport-modal').addEventListener('click', e=>{
+  if(e.target.id === 'importexport-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeImportExportModal();
+});
+
+document.getElementById('export-build').addEventListener('click', ()=>{
+  const includePlaces = document.getElementById('export-include-places').checked;
+  const includeRoutes = document.getElementById('export-include-routes').checked;
+  const includeReviews = document.getElementById('export-include-reviews').checked;
+  const snap = { exportedAt: Date.now(), tripName: tripData?.meta?.name || '' };
+  if(includePlaces) snap.places = tripData.places || [];
+  if(includeRoutes){
+    snap.routes = tripData.routes || [];
+    snap.days = tripData.days || [];
+  }
+  if(includeReviews){
+    // Never tripNotes.documents — same rule Publish/Share follows, confirmation numbers etc.
+    // stay private regardless of any checkbox here.
+    snap.tripNotes = { places: tripNotes.places || {}, routeStops: tripNotes.routeStops || {} };
+  }
+  const out = document.getElementById('export-output');
+  out.value = JSON.stringify(snap, null, 2);
+  out.classList.remove('hidden');
+  document.getElementById('export-copy').classList.remove('hidden');
+  document.getElementById('export-download').classList.remove('hidden');
+});
+
+document.getElementById('export-copy').addEventListener('click', async ()=>{
+  const btn = document.getElementById('export-copy');
+  try{
+    await navigator.clipboard.writeText(document.getElementById('export-output').value);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }catch(err){
+    alert('Could not copy automatically — select the text and copy manually.');
+  }
+});
+
+document.getElementById('export-download').addEventListener('click', ()=>{
+  const json = document.getElementById('export-output').value;
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${slugify(tripData?.meta?.name || 'trip') || 'trip'}-export.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+let importParsedData = null; // { places, routes, tripNotes } sanitized/validated by import-validate
+document.getElementById('import-validate').addEventListener('click', ()=>{
+  const errEl = document.getElementById('import-error');
+  errEl.textContent = '';
+  document.getElementById('import-options').classList.add('hidden');
+  document.getElementById('import-go').classList.add('hidden');
+  importParsedData = null;
+  let parsed;
+  try{
+    parsed = JSON.parse(document.getElementById('import-input').value);
+  }catch(err){
+    errEl.textContent = 'Could not parse as JSON: ' + err.message;
+    return;
+  }
+  if(typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)){
+    errEl.textContent = 'Expected a JSON object at the top level (an export from this app).';
+    return;
+  }
+  const hasPlaces = Array.isArray(parsed.places) && parsed.places.length > 0;
+  const hasRoutes = Array.isArray(parsed.routes) && parsed.routes.length > 0;
+  const hasReviews = !!(parsed.tripNotes && (parsed.tripNotes.places || parsed.tripNotes.routeStops));
+  if(!hasPlaces && !hasRoutes && !hasReviews){
+    errEl.textContent = 'Nothing importable found — expected "places", "routes", and/or "tripNotes".';
+    return;
+  }
+  let sanitizedPlaces = [];
+  if(hasPlaces){
+    const errors = [];
+    sanitizedPlaces = parsed.places.map((item,i)=>sanitizePlaceItem(item, errors, i)).filter(Boolean);
+    if(errors.length){
+      errEl.textContent = `Found ${errors.length} problem(s) in "places":\n` + errors.join('\n');
+      return;
+    }
+  }
+  importParsedData = {
+    places: sanitizedPlaces,
+    routes: hasRoutes ? parsed.routes : [],
+    tripNotes: hasReviews ? parsed.tripNotes : null
+  };
+
+  const placesCb = document.getElementById('import-include-places');
+  placesCb.checked = hasPlaces; placesCb.disabled = !hasPlaces;
+  const routesCb = document.getElementById('import-include-routes');
+  routesCb.checked = hasRoutes; routesCb.disabled = !hasRoutes;
+  const reviewsCb = document.getElementById('import-include-reviews');
+  reviewsCb.checked = false; reviewsCb.disabled = !hasReviews;
+  document.getElementById('import-places-label').textContent = hasPlaces ? `Places (${sanitizedPlaces.length})` : 'Places (none found)';
+  document.getElementById('import-routes-label').textContent = hasRoutes ? `Routes (${parsed.routes.length})` : 'Routes (none found)';
+  document.getElementById('import-reviews-label').textContent = hasReviews ? 'Ratings & reviews' : 'Ratings & reviews (none found)';
+  document.getElementById('import-options').classList.remove('hidden');
+  document.getElementById('import-go').classList.remove('hidden');
+});
+
+document.getElementById('import-go').addEventListener('click', async ()=>{
+  if(!importParsedData || !currentTripId) return;
+  const includePlaces = document.getElementById('import-include-places').checked && !document.getElementById('import-include-places').disabled;
+  const includeRoutes = document.getElementById('import-include-routes').checked && !document.getElementById('import-include-routes').disabled;
+  const includeReviews = document.getElementById('import-include-reviews').checked && !document.getElementById('import-include-reviews').disabled;
+
+  const update = {};
+  if(includePlaces) update.places = (tripData.places || []).concat(importParsedData.places);
+  if(includeRoutes){
+    // Fresh ids on import rather than trusting the export's own — avoids collisions if importing
+    // into the trip it was exported from, or alongside another import. placeId references inside
+    // stops are left as-is; dangling ones already render as "(unknown place)" everywhere, same
+    // tolerance Copy Trip already relies on.
+    const importedRoutes = importParsedData.routes.map((r,i)=>({
+      ...r,
+      id: slugify(r.label||'route') + '-import-' + Date.now().toString(36) + '-' + i
+    }));
+    update.routes = (tripData.routes || []).concat(importedRoutes);
+  }
+  if(Object.keys(update).length){
+    await db.collection('tripData').doc(currentTripId).update(update);
+    await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+    Object.assign(tripData, update);
+  }
+  if(includeReviews && importParsedData.tripNotes){
+    const notesUpdate = {};
+    if(importParsedData.tripNotes.places) notesUpdate.places = { ...(tripNotes.places||{}), ...importParsedData.tripNotes.places };
+    if(importParsedData.tripNotes.routeStops) notesUpdate.routeStops = { ...(tripNotes.routeStops||{}), ...importParsedData.tripNotes.routeStops };
+    await db.collection('tripNotes').doc(currentTripId).set(notesUpdate, { merge: true });
+    Object.assign(tripNotes, notesUpdate);
+  }
+  if(includePlaces) renderPlaces();
+  if(includeRoutes) renderRoutes();
+  closeImportExportModal();
+  if(includePlaces) startCoordsFixer();
 });
 
 // Read-only rendering for a `?share=tripId` link — reuses the same placeDetailHtml()/
@@ -2859,7 +3136,10 @@ document.getElementById('ai-open-edit-trip').addEventListener('click', ()=>{
   closeAiModal();
   openEditTripModal();
 });
-function closeAiModal(){ document.getElementById('ai-modal').classList.add('hidden'); }
+function closeAiModal(){
+  document.getElementById('ai-modal').classList.add('hidden');
+  document.getElementById('ai-card-review-modal').classList.add('hidden');
+}
 document.getElementById('btn-ai-generate').addEventListener('click', openAiModal);
 ['ai-cancel-1','ai-cancel-2','ai-cancel-3'].forEach(id=>document.getElementById(id).addEventListener('click', closeAiModal));
 document.getElementById('ai-modal').addEventListener('click', e=>{
@@ -2956,6 +3236,50 @@ document.getElementById('ai-copy').addEventListener('click', async ()=>{
   }
 });
 
+// Shared by AI place-generation import and JSON Import/Export (see Overview tab) — one
+// definition of "what a valid place object looks like" rather than two drifting copies.
+// opts.source forces a fixed source flag (AI-tier2 import always wants {ai:true,user:false});
+// omitting it preserves the item's own source/coordsSource when present (a JSON re-import of a
+// previously-exported place should keep an already-verified coordsSource:"osm" rather than
+// demoting it back to "ai" and re-flagging it for another coordinate check).
+function sanitizePlaceItem(item, errors, i, opts){
+  opts = opts || {};
+  if(typeof item !== 'object' || item === null || Array.isArray(item)){
+    errors.push(`Item ${i+1}: not an object.`);
+    return null;
+  }
+  const name = (item.name||'').toString().trim();
+  if(!name){ errors.push(`Item ${i+1}: missing "name".`); return null; }
+  const place = {
+    id: slugify(name),
+    name,
+    city: (item.city||'').toString(),
+    area: (item.area||'').toString(),
+    cat: Array.isArray(item.cat) ? item.cat.filter(c=>typeof c==='string').map(c=>c.toLowerCase()) : [],
+    wantRating: Number.isInteger(item.wantRating) && item.wantRating>=1 && item.wantRating<=10 ? item.wantRating : null,
+    price: {
+      amount: typeof item.price?.amount === 'number' ? item.price.amount : null,
+      currency: typeof item.price?.currency === 'string' ? item.price.currency : null,
+      note: typeof item.price?.note === 'string' ? item.price.note : ''
+    },
+    hours: {
+      open: typeof item.hours?.open === 'string' ? item.hours.open : null,
+      close: typeof item.hours?.close === 'string' ? item.hours.close : null,
+      note: typeof item.hours?.note === 'string' ? item.hours.note : ''
+    },
+    certainty: ['green','yellow','red'].includes(item.certainty) ? item.certainty : 'yellow',
+    note: typeof item.note === 'string' ? item.note : '',
+    wishlist: Array.isArray(item.wishlist) ? item.wishlist.filter(w=>typeof w==='string') : [],
+    links: Array.isArray(item.links) ? item.links.filter(l=>l && l.label && l.url).map(l=>({label:String(l.label), url:String(l.url)})) : [],
+    source: opts.source || (item.source && typeof item.source==='object' ? { ai: !!item.source.ai, user: !!item.source.user } : { ai: false, user: true })
+  };
+  if(item.coords && typeof item.coords.lat === 'number' && typeof item.coords.lng === 'number'){
+    place.coords = { lat: item.coords.lat, lng: item.coords.lng };
+    place.coordsSource = ['osm','user','ai'].includes(item.coordsSource) ? item.coordsSource : 'ai';
+  }
+  return place;
+}
+
 function validateAiResponse(){
   const errEl = document.getElementById('ai-error');
   errEl.textContent = '';
@@ -2971,43 +3295,7 @@ function validateAiResponse(){
     return null;
   }
   const errors = [];
-  const places = [];
-  parsed.forEach((item, i)=>{
-    if(typeof item !== 'object' || item === null || Array.isArray(item)){
-      errors.push(`Item ${i+1}: not an object.`);
-      return;
-    }
-    const name = (item.name||'').toString().trim();
-    if(!name){ errors.push(`Item ${i+1}: missing "name".`); return; }
-    const place = {
-      id: slugify(name),
-      name,
-      city: (item.city||'').toString(),
-      area: (item.area||'').toString(),
-      cat: Array.isArray(item.cat) ? item.cat.filter(c=>typeof c==='string').map(c=>c.toLowerCase()) : [],
-      wantRating: Number.isInteger(item.wantRating) && item.wantRating>=1 && item.wantRating<=10 ? item.wantRating : null,
-      price: {
-        amount: typeof item.price?.amount === 'number' ? item.price.amount : null,
-        currency: typeof item.price?.currency === 'string' ? item.price.currency : null,
-        note: typeof item.price?.note === 'string' ? item.price.note : ''
-      },
-      hours: {
-        open: typeof item.hours?.open === 'string' ? item.hours.open : null,
-        close: typeof item.hours?.close === 'string' ? item.hours.close : null,
-        note: typeof item.hours?.note === 'string' ? item.hours.note : ''
-      },
-      certainty: ['green','yellow','red'].includes(item.certainty) ? item.certainty : 'yellow',
-      note: typeof item.note === 'string' ? item.note : '',
-      wishlist: Array.isArray(item.wishlist) ? item.wishlist.filter(w=>typeof w==='string') : [],
-      links: Array.isArray(item.links) ? item.links.filter(l=>l && l.label && l.url).map(l=>({label:String(l.label), url:String(l.url)})) : [],
-      source: { ai: true, user: false }
-    };
-    if(item.coords && typeof item.coords.lat === 'number' && typeof item.coords.lng === 'number'){
-      place.coords = { lat: item.coords.lat, lng: item.coords.lng };
-      place.coordsSource = 'ai';
-    }
-    places.push(place);
-  });
+  const places = parsed.map((item,i)=>sanitizePlaceItem(item, errors, i, { source: { ai: true, user: false } })).filter(Boolean);
   if(errors.length){
     errEl.textContent = `Found ${errors.length} problem(s):\n` + errors.join('\n');
     return null;
@@ -3024,6 +3312,7 @@ document.getElementById('ai-validate').addEventListener('click', ()=>{
   const places = validateAiResponse();
   if(!places) return;
   aiPreviewPlaces = places;
+  aiPreviewMaybe = new Set();
   renderAiPreview();
   document.getElementById('ai-step-preview').classList.remove('hidden');
 });
@@ -3033,11 +3322,12 @@ function renderAiPreview(){
   const el = document.getElementById('ai-preview-list');
   el.innerHTML = aiPreviewPlaces.map((p, i)=>{
     const isDup = existingNames.has((p.name||'').trim().toLowerCase());
+    const isMaybe = aiPreviewMaybe.has(i);
     const meta = [p.city, p.area, formatPriceBase(p.price)].filter(Boolean).join(' · ');
     return `<label class="ai-preview-row">
       <input type="checkbox" class="ai-preview-check" data-idx="${i}" ${isDup?'':'checked'}>
       <div>
-        <div class="place-name">${p.name}${isDup?' <span class="badge b-red">Possible duplicate</span>':''}</div>
+        <div class="place-name">${p.name}${isDup?' <span class="badge b-red">Possible duplicate</span>':''}${isMaybe?' <span class="badge">Maybe — rating halved</span>':''}</div>
         ${meta ? `<div class="place-meta">${meta}</div>` : ''}
       </div>
     </label>`;
@@ -3047,7 +3337,13 @@ function renderAiPreview(){
 document.getElementById('ai-import').addEventListener('click', async ()=>{
   const checked = Array.from(document.querySelectorAll('.ai-preview-check:checked')).map(cb=>Number(cb.dataset.idx));
   if(!checked.length){ closeAiModal(); return; }
-  const toAdd = checked.map(i=>aiPreviewPlaces[i]);
+  const toAdd = checked.map(i=>{
+    const p = aiPreviewPlaces[i];
+    if(aiPreviewMaybe.has(i) && typeof p.wantRating === 'number'){
+      return { ...p, wantRating: Math.max(1, Math.round(p.wantRating/2)) };
+    }
+    return p;
+  });
   const places = (tripData.places || []).concat(toAdd);
   await db.collection('tripData').doc(currentTripId).update({ places });
   await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
@@ -3056,6 +3352,92 @@ document.getElementById('ai-import').addEventListener('click', async ()=>{
   closeAiModal();
   startCoordsFixer(); // newly-imported places need checking — jump straight into review
 });
+
+// ---------- AI place-import card review (optional, opens on top of the checklist above) ----------
+// The checklist (#ai-step-preview) stays the primary/default interaction and the single source of
+// truth for what gets imported — this is a bigger, roomier secondary dialog for looking at each
+// candidate one at a time before deciding. Every decision here is really just "check/uncheck the
+// underlying checkbox" (+ membership in aiPreviewMaybe for the wantRating-halving "maybe" case),
+// applied directly to the live checklist DOM so the two views can never drift out of sync — closing
+// this dialog always reflects exactly what was decided, nothing recomputed on close.
+let aiPreviewMaybe = new Set();  // indices (into aiPreviewPlaces) marked "maybe" — only meaningful
+                                  // while also checked; reject/approve always clear membership
+let aiCardCursor = 0;
+
+function aiCardDecisionOf(idx){
+  const cb = document.querySelector(`.ai-preview-check[data-idx="${idx}"]`);
+  if(!cb || !cb.checked) return 'reject';
+  return aiPreviewMaybe.has(idx) ? 'maybe' : 'approve';
+}
+
+function aiCardDetailHtml(p){
+  const thumbUrl = thumbnailLinkOf(p)?.url;
+  const catTags = (p.cat||[]).map(c=>`<span class="tag">${formatCat(c)}</span>`).join('');
+  const links = (p.links||[]).filter(l=>!isThumbnailLabel(l.label)).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
+  const priceBase = formatPriceBase(p.price);
+  const priceLine = (priceBase || p.price?.note) ? `<div class="place-meta">Price: ${priceBase||'–'}${noteChipHtml(p.price?.note)}</div>` : '';
+  const hoursBase = formatHours(p.hours);
+  const hoursLine = (hoursBase || p.hours?.note) ? `<div class="place-meta">Hours: ${hoursBase||'–'}${noteChipHtml(p.hours?.note)}</div>` : '';
+  const wantClass = (p.wantRating||0) > 7 ? 'want-rating main' : 'want-rating';
+  const coordsLine = p.coords
+    ? `<div class="place-meta">📍 Coordinates provided (${p.coords.lat.toFixed(4)}, ${p.coords.lng.toFixed(4)}) — verified after import</div>`
+    : `<div class="place-meta">📍 No coordinates yet — will need manual checking after import</div>`;
+  return `
+    ${thumbUrl ? `<img src="${thumbUrl}" alt="" class="ai-card-photo">` : `<div class="ai-card-photo-blank">No photo yet</div>`}
+    <div style="margin-top:14px;">
+      <div class="place-name" style="font-size:1.35rem;">${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)}</div>
+      <div class="place-meta" style="font-size:.95rem;">${[p.city, p.area].filter(Boolean).join(' · ')}</div>
+      ${catTags ? `<div style="margin-top:10px;">${catTags}</div>` : ''}
+      <div style="margin-top:10px;">${priceLine}${hoursLine}${coordsLine}</div>
+      ${p.note ? `<div class="place-general-note" style="margin-top:12px;">${p.note}</div>` : ''}
+      ${(p.wishlist||[]).length ? `<div class="place-meta" style="margin-top:12px;"><strong>Wishlist:</strong> ${p.wishlist.join(', ')}</div>` : ''}
+      ${links ? `<div style="margin-top:12px;">${links}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderAiCard(){
+  const progressEl = document.getElementById('ai-card-progress');
+  progressEl.textContent = `Place ${aiCardCursor+1} of ${aiPreviewPlaces.length}`;
+  const p = aiPreviewPlaces[aiCardCursor];
+  document.getElementById('ai-card-content').innerHTML = aiCardDetailHtml(p);
+  document.getElementById('ai-card-prev').disabled = aiCardCursor === 0;
+  const decision = aiCardDecisionOf(aiCardCursor);
+  ['reject','maybe','approve'].forEach(d=>{
+    document.getElementById(`ai-card-${d}`).classList.toggle('active', decision===d);
+  });
+}
+
+document.getElementById('ai-open-card-review').addEventListener('click', ()=>{
+  if(!aiPreviewPlaces.length) return;
+  aiCardCursor = 0;
+  renderAiCard();
+  document.getElementById('ai-card-review-modal').classList.remove('hidden');
+});
+document.getElementById('ai-card-done').addEventListener('click', ()=>{
+  document.getElementById('ai-card-review-modal').classList.add('hidden');
+  renderAiPreview(); // reflect any maybe/reject/approve badges picked up in the card view
+});
+document.getElementById('ai-card-review-modal').addEventListener('click', e=>{
+  if(e.target.id === 'ai-card-review-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)){
+    document.getElementById('ai-card-review-modal').classList.add('hidden');
+    renderAiPreview();
+  }
+});
+document.getElementById('ai-card-prev').addEventListener('click', ()=>{
+  if(aiCardCursor > 0){ aiCardCursor--; renderAiCard(); }
+});
+function decideAiCard(decision){
+  const idx = aiCardCursor;
+  const cb = document.querySelector(`.ai-preview-check[data-idx="${idx}"]`);
+  if(cb) cb.checked = decision !== 'reject';
+  if(decision === 'maybe') aiPreviewMaybe.add(idx); else aiPreviewMaybe.delete(idx);
+  if(aiCardCursor < aiPreviewPlaces.length-1){ aiCardCursor++; renderAiCard(); }
+  else renderAiCard(); // stay on the last card, just refresh its active-decision highlight
+}
+document.getElementById('ai-card-reject').addEventListener('click', ()=>decideAiCard('reject'));
+document.getElementById('ai-card-maybe').addEventListener('click', ()=>decideAiCard('maybe'));
+document.getElementById('ai-card-approve').addEventListener('click', ()=>decideAiCard('approve'));
 
 // ---------- AI route generation (Tier 2, mirrors AI place generation above) ----------
 // Places without coords can't be geographically clustered, and the base-of-operations place
@@ -3100,6 +3482,27 @@ function updateRoutesEligibleHint(){
     : `${eligible.length} place(s) in ${city} will be used.`;
 }
 
+// Generation method for the Routes modal — 'ai' (paste-back, existing flow) or 'algo' (in-app
+// clustering, no AI call). Both end up at the same #routes-step-preview checklist either way; the
+// method only decides what routes-build does and which setup fields are relevant.
+let routesGenMethod = 'ai';
+function setRoutesGenMethod(method){
+  routesGenMethod = method;
+  document.querySelectorAll('#routes-gen-method .cat-chip').forEach(chip=>{
+    chip.classList.toggle('active', chip.dataset.method === method);
+  });
+  document.getElementById('routes-algo-hint').style.display = method === 'algo' ? '' : 'none';
+  // Travel methods / batch notes only mean anything for the AI instruction text — the algorithm
+  // doesn't read either.
+  document.getElementById('routes-field-travel-methods').style.display = method === 'algo' ? 'none' : '';
+  document.getElementById('routes-field-notes').style.display = method === 'algo' ? 'none' : '';
+  document.getElementById('routes-build').textContent = method === 'algo' ? 'Generate routes' : 'Generate instructions';
+}
+document.getElementById('routes-gen-method').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(btn) setRoutesGenMethod(btn.dataset.method);
+});
+
 function openRoutesModal(){
   document.getElementById('routes-step-setup').classList.remove('hidden');
   document.getElementById('routes-step-instructions').classList.add('hidden');
@@ -3108,6 +3511,7 @@ function openRoutesModal(){
   document.getElementById('routes-response').value = '';
   document.getElementById('routes-count').value = 3;
   document.getElementById('routes-notes').value = '';
+  setRoutesGenMethod('ai');
 
   const citySel = document.getElementById('routes-city');
   const cities = tripData?.meta?.cities || [];
@@ -3173,7 +3577,193 @@ function buildRoutesInstruction(){
   return lines.join('\n');
 }
 
+// ---------- Algorithmic route generation (no AI) ----------
+// v1 scope per CLAUDE.md "Routing / planning": geographic clustering + nearest-neighbor ordering
+// (from whichever cluster member is nearest the base of operations) + a bounded 2-opt cleanup pass
+// + a category-adjacency rule, deliberately WITHOUT wantRating-balancing across clusters (flagged
+// as a fair follow-up once it's clear how lopsided the naive version is in practice). Feeds into
+// the exact same #routes-step-preview checklist/import pipeline as the AI path — the route object
+// shape produced here matches validateRoutesResponse()'s output exactly, so nothing downstream
+// needs to know which method produced it.
+
+// Categories that function as a "break" rather than a destination — two in a row reads as
+// redundant (two restaurants back to back) the way two of a non-break category (two museums)
+// doesn't. A small constant rather than a user-facing setting for v1.
+const ROUTE_ALGO_BREAK_LIKE_CATS = ['food'];
+function routeAlgoSharesBreakCategory(a, b){
+  const catsA = a.cat || [], catsB = b.cat || [];
+  return ROUTE_ALGO_BREAK_LIKE_CATS.some(c => catsA.includes(c) && catsB.includes(c));
+}
+
+// Greedy farthest-point seeding (a lightweight, deterministic k-means++-style seed — no PRNG, so
+// re-clicking "Generate routes" against the same data reproduces the same clusters) followed by a
+// fixed number of Lloyd's-algorithm iterations. Place counts here are dozens at most, so a fixed
+// small cap is plenty rather than needing a convergence check.
+function kMeansCluster(points, k){
+  if(points.length <= k) return points.map(p=>[p]);
+  const centroids = [points[0]];
+  while(centroids.length < k){
+    let best = null, bestDist = -1;
+    for(const p of points){
+      const d = Math.min(...centroids.map(c=>haversineMeters(p.coords.lat,p.coords.lng,c.coords.lat,c.coords.lng)));
+      if(d > bestDist){ bestDist = d; best = p; }
+    }
+    centroids.push(best);
+  }
+  let centroidPos = centroids.map(c=>({lat:c.coords.lat, lng:c.coords.lng}));
+  let assignments = points.map(()=>0);
+  for(let iter=0; iter<12; iter++){
+    assignments = points.map(p=>{
+      let bestI = 0, bestD = Infinity;
+      centroidPos.forEach((c,i)=>{
+        const d = haversineMeters(p.coords.lat,p.coords.lng,c.lat,c.lng);
+        if(d < bestD){ bestD = d; bestI = i; }
+      });
+      return bestI;
+    });
+    const sums = centroidPos.map(()=>({lat:0,lng:0,count:0}));
+    points.forEach((p,i)=>{
+      const a = assignments[i];
+      sums[a].lat += p.coords.lat; sums[a].lng += p.coords.lng; sums[a].count++;
+    });
+    centroidPos = sums.map((s,i)=> s.count ? {lat:s.lat/s.count, lng:s.lng/s.count} : centroidPos[i]);
+  }
+  const clusters = centroidPos.map(()=>[]);
+  points.forEach((p,i)=>clusters[assignments[i]].push(p));
+  return clusters.filter(c=>c.length);
+}
+
+function nearestNeighborOrder(points, startPoint){
+  const remaining = points.slice();
+  const startIdx = remaining.indexOf(startPoint);
+  if(startIdx >= 0) remaining.splice(startIdx, 1);
+  const order = [startPoint];
+  let current = startPoint;
+  while(remaining.length){
+    let bestI = 0, bestD = Infinity;
+    remaining.forEach((p,i)=>{
+      const d = haversineMeters(current.coords.lat,current.coords.lng,p.coords.lat,p.coords.lng);
+      if(d < bestD){ bestD = d; bestI = i; }
+    });
+    current = remaining.splice(bestI, 1)[0];
+    order.push(current);
+  }
+  return order;
+}
+
+// Bounded path 2-opt — reverses a sub-segment whenever doing so shortens total distance, capped at
+// a fixed number of passes. Cluster sizes here are small (a handful to ~10 stops), so this
+// converges well before the cap; the cap just guards against a pathological case, it isn't
+// load-bearing.
+function twoOptImprove(order){
+  const n = order.length;
+  if(n < 4) return order;
+  let improved = true, passes = 0;
+  while(improved && passes < 20){
+    improved = false;
+    passes++;
+    for(let i=0; i<n-2; i++){
+      for(let j=i+2; j<n-1; j++){
+        const a=order[i], b=order[i+1], c=order[j], d=order[j+1];
+        const before = haversineMeters(a.coords.lat,a.coords.lng,b.coords.lat,b.coords.lng)
+                     + haversineMeters(c.coords.lat,c.coords.lng,d.coords.lat,d.coords.lng);
+        const after = haversineMeters(a.coords.lat,a.coords.lng,c.coords.lat,c.coords.lng)
+                    + haversineMeters(b.coords.lat,b.coords.lng,d.coords.lat,d.coords.lng);
+        if(after + 1 < before){ // small epsilon avoids churn on floating-point noise
+          const seg = order.slice(i+1, j+1).reverse();
+          order.splice(i+1, seg.length, ...seg);
+          improved = true;
+        }
+      }
+    }
+  }
+  return order;
+}
+
+// Local repair for the category-adjacency rule: when two adjacent stops share a break-like
+// category, try swapping the later one with the stop two positions over, picking the swap only if
+// it actually fixes the adjacency without creating a new one right after. Not a global
+// re-optimization — a single adjacent-swap heuristic is enough for the realistic case (a handful of
+// same-category places scattered through a short route); if no swap helps, the adjacency is simply
+// left as-is rather than forcing a worse route trying to chase a fix.
+function repairCategoryAdjacency(order){
+  let changed = true, guard = 0;
+  while(changed && guard < order.length * 2){
+    changed = false;
+    guard++;
+    for(let i=0; i<order.length-1; i++){
+      if(!routeAlgoSharesBreakCategory(order[i], order[i+1])) continue;
+      const j = i+2;
+      if(j >= order.length) continue;
+      const wouldFixHere = !routeAlgoSharesBreakCategory(order[i], order[j]);
+      const wouldNotBreakNext = j+1 >= order.length || !routeAlgoSharesBreakCategory(order[i+1], order[j+1]);
+      if(wouldFixHere && wouldNotBreakNext){
+        [order[i+1], order[j]] = [order[j], order[i+1]];
+        changed = true;
+      }
+    }
+  }
+  return order;
+}
+
+// Returns { routes } on success or { error } — mirrors validateRoutesResponse()'s route shape
+// exactly (generatedBy:'algorithm' instead of 'ai') so it drops straight into the same preview.
+function generateRoutesByAlgorithm(city, opts){
+  opts = opts || {};
+  const eligible = getEligiblePlacesForRoutes(city);
+  if(eligible.length < 2){
+    return { error: 'Not enough places with coordinates in this city to generate routes — check coordinates first (see the Places tab).' };
+  }
+  const base = findBasePlace();
+  const desiredRouteCount = Math.max(1, opts.routeCount || 3);
+  const stopsPerRoute = Math.max(2, opts.stopsPerRoute || 5);
+  const k = Math.max(1, Math.min(desiredRouteCount, Math.ceil(eligible.length / stopsPerRoute)));
+
+  const clusters = kMeansCluster(eligible, k);
+  const routes = clusters.map((cluster, ci)=>{
+    if(!cluster.length) return null;
+    const startPoint = base?.coords
+      ? cluster.reduce((best,p)=>
+          haversineMeters(p.coords.lat,p.coords.lng,base.coords.lat,base.coords.lng) <
+          haversineMeters(best.coords.lat,best.coords.lng,base.coords.lat,base.coords.lng) ? p : best,
+        cluster[0])
+      : cluster[0];
+    let order = nearestNeighborOrder(cluster, startPoint);
+    order = twoOptImprove(order);
+    order = repairCategoryAdjacency(order);
+
+    const stopPlaces = base?.coords ? [base, ...order, base] : order;
+    const stops = stopPlaces.map(p=>({ type:'place', placeId: p.id, note:'', stayDuration: null }));
+    const interstops = [];
+    for(let g=0; g<stops.length-1; g++) interstops.push({ items: [] });
+    const totalWantRating = order.reduce((sum,p)=>sum+(p.wantRating||0), 0);
+
+    return {
+      id: 'route-algo-' + Date.now().toString(36) + '-' + ci,
+      city, label: `Route ${ci+1} (auto)`, stops, interstops, totalWantRating,
+      generatedBy: 'algorithm', edited: false
+    };
+  }).filter(Boolean);
+
+  return { routes };
+}
+
 document.getElementById('routes-build').addEventListener('click', ()=>{
+  if(routesGenMethod === 'algo'){
+    const errEl = document.getElementById('routes-error');
+    errEl.textContent = '';
+    const city = document.getElementById('routes-city').value;
+    const result = generateRoutesByAlgorithm(city, {
+      routeCount: Number(document.getElementById('routes-count').value) || 3,
+      stopsPerRoute: Number(document.getElementById('routes-stops-per-route').value) || 5
+    });
+    if(result.error){ errEl.textContent = result.error; return; }
+    routesPreviewList = result.routes;
+    routesPreviewChecked = new Set(result.routes.map((_, i)=>i));
+    renderRoutesPreview();
+    document.getElementById('routes-step-preview').classList.remove('hidden');
+    return;
+  }
   document.getElementById('routes-instructions').value = buildRoutesInstruction();
   document.getElementById('routes-step-instructions').classList.remove('hidden');
 });
@@ -3644,7 +4234,7 @@ function renderRoutes(){
   el.innerHTML = Array.from(byCity.entries()).map(([city, items])=>{
     const cards = items.map(({r,i})=>{
       const sequence = routeStopSequenceLine(r, base, 'place-thumb-sm');
-      const provenance = r.generatedBy === 'manual' ? '✎ Manual' : '✨ AI-generated';
+      const provenance = r.generatedBy === 'manual' ? '✎ Manual' : r.generatedBy === 'algorithm' ? '🧮 Algorithm' : '✨ AI-generated';
       const expanded = expandedRouteIdx === i;
       const totalTime = computeRouteTotalTime(r);
       const totalTimeLine = totalTime != null ? `<p class="place-meta">Total time: ~${formatMinutes(totalTime)}</p>` : '';
@@ -3688,6 +4278,155 @@ document.getElementById('routes-list').addEventListener('click', e=>{
   if(e.target.closest('a, button')) return; // let the Map link (or any button) do its own thing
   const stopRow = e.target.closest('.js-route-stop-click');
   if(stopRow) return focusRouteMapOnStop(Number(stopRow.dataset.stopIdx));
+});
+
+// ---------- OpenRouteService: real leg distance/time ----------
+// See CLAUDE.md "Routing / planning" for the full design. Interstop item types map to ORS routing
+// profiles where one exists; metro/bus/train/ferry have no ORS profile and stay AI-estimated/manual
+// as before. "taxi" reuses the driving profile — the request that made it clear "same as car" was
+// the actually-useful behavior rather than a special one.
+const ORS_PROFILE_BY_TYPE = { walk: 'foot-walking', bike: 'cycling-regular', car: 'driving-car', taxi: 'driving-car' };
+
+// Every ORS call in the app funnels through this queue, spaced comfortably under the free tier's
+// 40/minute cap (1.6s apart = 37.5/min) — a single "Calculate" click only ever issues one call per
+// distinct profile in the route (via the Matrix API below, not one call per leg), so this rarely
+// actually waits; it exists mainly to protect a hypothetical future bulk "recalculate every route"
+// action from bursting past the limit, same reasoning as the Nominatim coordinate-checker's queue.
+let orsQueueTail = Promise.resolve();
+function orsRateLimitedFetch(url, opts){
+  const run = orsQueueTail.then(() => fetch(url, opts));
+  orsQueueTail = run.then(() => new Promise(r => setTimeout(r, 1600)), () => new Promise(r => setTimeout(r, 1600)));
+  return run;
+}
+
+// Session-only cache, not persisted — the real source of truth is whatever gets written into a
+// route's own interstops once the editor is saved. This just avoids re-fetching the same pair
+// (same two places, same profile) twice in one sitting, e.g. across several routes that happen to
+// share a leg. Cached directionally (A→B kept separate from B→A) since real streets aren't
+// symmetric (one-ways, elevation) even though the free tier's distances/durations often are close.
+let orsLegCache = new Map();
+function orsCacheKey(fromId, toId, profile){ return `${fromId}|${toId}|${profile}`; }
+
+// One Matrix API call per distinct profile, covering every stop in the route at once (small N —
+// at most a dozen or so stops incl. the base) rather than one Directions call per leg. Returns a
+// lookup keyed by "fromId|toId" with {distanceM, durationMin}, only for pairs actually returned.
+async function orsMatrixForProfile(profile, places){
+  const coordsList = places.map(p => [p.coords.lng, p.coords.lat]);
+  const res = await orsRateLimitedFetch(`https://api.openrouteservice.org/v2/matrix/${profile}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': ORS_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ locations: coordsList, metrics: ['distance','duration'] })
+  });
+  if(!res.ok){
+    const body = await res.text().catch(()=>'');
+    throw new Error(`OpenRouteService request failed (${res.status}): ${body.slice(0,200)}`);
+  }
+  const data = await res.json();
+  const lookup = new Map();
+  places.forEach((from,i)=>{
+    places.forEach((to,j)=>{
+      if(i===j) return;
+      const distanceM = data.distances?.[i]?.[j];
+      const durationS = data.durations?.[i]?.[j];
+      if(distanceM == null || durationS == null) return;
+      const key = orsCacheKey(from.id, to.id, profile);
+      const val = { distanceM: Math.round(distanceM), durationMin: Math.round(durationS/60) };
+      lookup.set(key, val);
+      orsLegCache.set(key, val);
+    });
+  });
+  return lookup;
+}
+
+// Picks a sensible profile for a gap with no existing travel item at all — the trip's own
+// preferred travel methods (Edit trip details → Travel methods) if any of them map to a real ORS
+// profile, else "walk" as the most common default for city-to-city-block distances. "public
+// transport" has no ORS profile (see ORS_PROFILE_BY_TYPE) so it's skipped even if preferred.
+function defaultOrsLegType(){
+  const prefs = (tripData?.meta?.preferences?.travelMethods) || [];
+  if(prefs.includes('walking')) return 'walk';
+  if(prefs.includes('car')) return 'car';
+  return 'walk';
+}
+
+// Operates on the route editor's in-memory {places, interstops} state (bare-array gap shape, same
+// as normalizeRoute() returns — see the "Manual route editor" comment below) and mutates it in
+// place. Nothing is written to Firestore here — same "nothing saves until Save" rule as every other
+// editor action, so a bad calculation is trivially discardable by just closing the editor. Returns
+// a small summary string for the status line rather than throwing on a per-leg basis; a single gap
+// with no ORS-mappable type (transit-only, or genuinely no coords) is silently skipped, not an
+// error — only a total failure (bad/missing API key, network failure) throws.
+async function calculateRouteTravel(places, interstops){
+  if(!orsApiKeyConfigured()){
+    throw new Error('OpenRouteService API key not configured — see the ORS_API_KEY comment near the top of index.html.');
+  }
+  const resolved = places.map(s => (tripData.places||[]).find(pl=>pl.id===s.placeId)).map((p,i)=>({ p, stop: places[i] }));
+  const missingCoords = resolved.filter(r=>!r.p?.coords).length;
+
+  // Which gaps need calculating, and with which profile — an existing item whose type already
+  // maps to a profile gets recalculated onto that same item; a genuinely empty gap gets one new
+  // item created using defaultOrsLegType(). A gap whose only item(s) are "break" or a
+  // non-ORS-mappable type (metro/bus/train/ferry/custom) is left alone entirely.
+  const gapPlans = []; // { gapIdx, profile, itemIdx (existing) | null (new item to create) }
+  interstops.forEach((items, g)=>{
+    if(!resolved[g]?.p?.coords || !resolved[g+1]?.p?.coords) return; // can't route without both endpoints
+    if(!items.length){
+      gapPlans.push({ gapIdx: g, profile: ORS_PROFILE_BY_TYPE[defaultOrsLegType()], itemIdx: null, newType: defaultOrsLegType() });
+      return;
+    }
+    const itemIdx = items.findIndex(it => ORS_PROFILE_BY_TYPE[it.type]);
+    if(itemIdx === -1) return; // every item here is a break/transit/custom type — nothing to calculate
+    gapPlans.push({ gapIdx: g, profile: ORS_PROFILE_BY_TYPE[items[itemIdx].type], itemIdx });
+  });
+
+  if(!gapPlans.length){
+    return { updated: 0, skipped: interstops.length, missingCoords, note: 'Nothing to calculate — every gap is either a break/transit leg or missing coordinates on one side.' };
+  }
+
+  const profilesNeeded = Array.from(new Set(gapPlans.map(g=>g.profile)));
+  const placesWithCoords = resolved.filter(r=>r.p?.coords).map(r=>r.p);
+  const lookupsByProfile = {};
+  for(const profile of profilesNeeded){
+    // Skip the network call entirely if every pair this profile needs is already cached.
+    const needed = gapPlans.filter(g=>g.profile===profile);
+    const allCached = needed.every(g => orsLegCache.has(orsCacheKey(resolved[g.gapIdx].p.id, resolved[g.gapIdx+1].p.id, profile)));
+    lookupsByProfile[profile] = allCached ? orsLegCache : await orsMatrixForProfile(profile, placesWithCoords);
+  }
+
+  let updated = 0;
+  gapPlans.forEach(({gapIdx, profile, itemIdx, newType})=>{
+    const fromId = resolved[gapIdx].p.id, toId = resolved[gapIdx+1].p.id;
+    const val = lookupsByProfile[profile].get(orsCacheKey(fromId, toId, profile));
+    if(!val) return; // ORS didn't return this pair (e.g. unroutable) — leave it untouched
+    if(itemIdx === null){
+      interstops[gapIdx].push({ type: newType, time: val.durationMin, distance: val.distanceM, cost: null, note: '' });
+    }else{
+      interstops[gapIdx][itemIdx].time = val.durationMin;
+      interstops[gapIdx][itemIdx].distance = val.distanceM;
+    }
+    updated++;
+  });
+
+  return { updated, skipped: interstops.length - gapPlans.length, missingCoords };
+}
+
+document.getElementById('btn-route-calc-travel').addEventListener('click', async ()=>{
+  const statusEl = document.getElementById('route-calc-status');
+  statusEl.textContent = 'Calculating…';
+  try{
+    const result = await calculateRouteTravel(routeEditorPlaces, routeEditorInterstops);
+    renderRouteEditorStops();
+    const parts = [];
+    if(result.updated) parts.push(`Updated ${result.updated} leg${result.updated===1?'':'s'}`);
+    if(result.skipped) parts.push(`${result.skipped} gap${result.skipped===1?'':'s'} skipped (break/transit/no coords)`);
+    if(result.missingCoords) parts.push(`${result.missingCoords} stop(s) missing coordinates`);
+    statusEl.textContent = parts.length ? parts.join(' — ') : (result.note || 'Nothing to calculate.');
+  }catch(err){
+    statusEl.textContent = err.message || 'Calculation failed.';
+  }
 });
 
 // ---------- Manual route editor (also used to edit AI-generated routes) ----------
@@ -3744,6 +4483,7 @@ function openRouteEditor(idx, mode){
   document.getElementById('route-editor-title').textContent =
     routeEditorMode === 'edit' ? 'Edit route' : routeEditorMode === 'preview' ? 'Edit route (AI preview)' : 'Add route';
   document.getElementById('route-editor-error').textContent = '';
+  document.getElementById('route-calc-status').textContent = '';
   document.getElementById('route-editor-label').value = existing?.label || '';
   document.getElementById('route-editor-add-search').value = '';
   document.getElementById('route-editor-add-results').classList.add('hidden');

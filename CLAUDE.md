@@ -502,12 +502,33 @@ or mixes across sections of the same trip:
    validation (every item needs at least
    `name`; malformed items block the whole import with a per-item error list, nothing partial) →
    checklist preview (place + one-line summary, checkbox per item, likely duplicates —
-   case-insensitive name match against existing places — pre-unchecked) → "Import selected"
-   appends the checked ones to the live trip's `places[]` directly. Note: this is narrower than
-   the full Draft flow below — it's an "add more places to an already-saved trip" tool, so it
-   writes straight to Firestore after the checklist step rather than staging in `localStorage`
-   first. Not yet built for routes/days, and coordinates the AI supplies aren't cross-checked
-   against Nominatim yet (see "Coordinates").
+   case-insensitive name match against existing places — pre-unchecked, plus an optional card
+   review — see below) → "Import selected" appends the checked ones to the live trip's `places[]`
+   directly. Note: this is narrower than the full Draft flow below — it's an "add more places to an
+   already-saved trip" tool, so it writes straight to Firestore after the checklist step rather than
+   staging in `localStorage` first. Not yet built for routes/days, and coordinates the AI supplies
+   aren't cross-checked against Nominatim yet (see "Coordinates").
+
+   **Optional card review** (`#ai-card-review-modal`, "🖼 Review as cards" button on the checklist
+   screen): the checklist stays the default/primary interaction — this is a bigger, roomier
+   secondary dialog that opens *on top of* the checklist for looking at candidates one at a time
+   instead of scanning a compact list, not a replacement flow. Each card shows a large photo (or a
+   dashed-border placeholder if the AI didn't supply one — most won't yet, Wikipedia lookup only
+   runs after import) at full card width, then name/wantRating/certainty, city/area, category tags,
+   price, hours, a coordinates-provided/not-provided line (useful context for the coordinate-check
+   step that follows import), the place's note, wishlist, and links — all in a single-column,
+   generously-spaced layout that also works on mobile (`.ai-card-review-box`, capped at 640px/94vw).
+   Three always-colored decision buttons — **✕ Reject** (red), **? Maybe** (mustard), **✓ Approve**
+   (moss) — fill solid once selected for the card on screen. Deciding is really just "check/uncheck
+   the corresponding checklist checkbox" (Reject/Approve) plus membership in an `aiPreviewMaybe`
+   `Set` for "Maybe" (which halves that place's `wantRating` — `Math.max(1, Math.round(rating/2))`
+   — at import time, on the theory that "maybe" means uncertain-but-not-a-no) — applied directly to
+   the live checklist DOM on every decision, so the two views can never drift: closing the card
+   dialog (Done, or clicking the backdrop) just re-renders the checklist to reflect whatever was
+   decided, nothing is recomputed. `sanitizePlaceItem()` — the per-item validation body extracted
+   out of `validateAiResponse()` — is the shared function behind this pipeline and the JSON Import
+   feature below, so there's one definition of "what a valid place object looks like" rather than
+   two that could drift apart.
 3. **In-app direct call** — the app calls an AI API itself. Requires a small serverless proxy
    (Firebase Cloud Function is the natural choice, same project as everything else) that holds
    the AI provider's API key server-side and verifies the caller's Firebase ID token before
@@ -825,21 +846,127 @@ version of this doc**: this used to live here on the Routes tab as day-assignmen
 route card; moved to the Day-by-day tab instead (a persistent "+ Add routes" checklist on Level 2)
 after actually using it — see the reasoning under "Day-by-day tab" below.
 
-⬜ **Deliberately deferred**: real distance/time via OpenRouteService (numbers are still AI-suggested
-or hand-entered estimates, not computed against a routing API). A genuine in-app clustering
-algorithm remains a fair v2 once it's clear whether AI-generated routes are good enough in practice
-(the manual editor is where it would plug in).
+✅ **Implemented: OpenRouteService integration for real leg distance/time**. A "🧭 Calculate times &
+distances" button in the manual route editor (`#route-editor-modal`, next to the stop search) runs
+`calculateRouteTravel(places, interstops)` against the editor's own in-memory `{places, interstops}`
+state (same bare-array gap shape `normalizeRoute()` returns) and mutates it directly — same
+"nothing writes to Firestore until Save" rule every other editor action follows, so a bad
+calculation is trivially discardable by just closing the editor without saving. Works for both
+AI-generated and algorithm-generated (or hand-built) routes equally — it operates purely on
+coordinates and interstop item types, with no notion of provenance.
+
+**Key/config**: `ORS_API_KEY` — a placeholder constant (`'PASTE_YOUR_ORS_API_KEY_HERE'`) near
+`DRIVE_API_KEY`, same "not a secret, just a rate-limited public key" trust model, filled in the same
+way (`orsApiKeyConfigured()` checks it's set and doesn't still start with `'PASTE_'`, mirroring
+`driveApiKeyConfigured()`). Free at openrouteservice.org/dev (sign up → Dashboard → request a
+"Standard" token, no billing/card). Calculating with no key configured throws a clear error shown in
+the editor's status line rather than failing silently or looking like a network problem.
+
+**Profile mapping** (`ORS_PROFILE_BY_TYPE`): walk→`foot-walking`, bike→`cycling-regular`, car and
+taxi→`driving-car` (taxi treated identically to car — same road network, same realistic travel
+time). metro/bus/train/ferry/break/custom types have no ORS profile and are left exactly as they
+were — AI-estimated or hand-entered, same as before this existed.
+
+**One Matrix API call per distinct profile actually used in the route**, not one Directions call
+per leg — `orsMatrixForProfile()` sends every stop's coordinates as `locations` and reads back the
+full distance/duration matrix, then picks out just the consecutive-stop pairs each gap needs. A
+route mixing walk and car legs costs exactly 2 calls regardless of how many legs of each there are.
+Every ORS call funnels through `orsRateLimitedFetch()`, a shared queue pacing requests 1.6s apart
+(comfortably under the free tier's 40/minute cap) — mirrors the Nominatim coordinate-checker's
+existing throttled-queue pattern; a single "Calculate" click rarely actually waits on it (1-2 calls),
+it mainly guards a hypothetical future bulk "recalculate every route" action against bursting.
+
+**Session-only cache** (`orsLegCache`, keyed `fromPlaceId|toPlaceId|profile`, directional — A→B
+cached separately from B→A since real streets aren't symmetric) avoids re-fetching a pair already
+looked up earlier in the same sitting (e.g. the same two places sharing a leg across more than one
+route); if every pair a profile needs is already cached, `calculateRouteTravel()` skips the network
+call for that profile entirely. Not persisted — the real source of truth after a Save is whatever
+ends up written into the route's own `interstops`, same as any other editor field.
+
+**Per-gap behavior**: an existing interstop item whose `type` maps to a profile gets recalculated
+onto that same item (`time`/`distance` overwritten, `cost`/`note` left untouched — ORS has no notion
+of cost); a completely empty gap gets exactly one *new* item created using
+`defaultOrsLegType()` (the trip's preferred travel methods if any map to a profile, else `'walk'`);
+a gap whose only item(s) are breaks/transit/custom types is left alone entirely, and a gap missing
+coordinates on either endpoint is skipped and counted separately (`missingCoords`) rather than
+silently ignored — the status line reports updated/skipped/missing-coords counts after every run so
+none of that is invisible.
+
+Verified with a standalone Node harness (mocked `fetch`, synthetic places/trip data) before wiring
+into the UI: throws cleanly with no key configured; fills an empty gap with the right default type
+and numbers; leaves a `metro` leg (no ORS profile) completely untouched while still counting it as
+skipped; recalculates an existing `car` leg's time/distance while preserving its `cost`/`note`;
+correctly skips and counts a gap where one endpoint has no coordinates; serves an identical
+second call entirely from cache (zero additional fetches); and a route mixing walk + car legs
+issues exactly 2 matrix calls, not one per leg.
+
+⬜ **Deliberately not wired in for this pass**: auto-running this right after AI or algorithm route
+generation, rather than requiring an explicit editor click. Judged too risky to make automatic
+before real end-to-end use with an actual (non-placeholder) API key — a manual button is
+inspectable, reversible (nothing saves without Save), and degrades obviously (a clear error, not a
+silent no-op or a surprise burst of network calls) if the key isn't configured yet or something's
+misrouted. Worth revisiting as a default-on convenience once the manual path has seen real use.
+
+✅ **Implemented: in-app geographic clustering algorithm (v1)** — an alternative to AI-generated
+routes, not a replacement. The existing "Generate routes with AI" button/modal now opens a generic
+"Generate routes" dialog with a method toggle at the top of setup: **✨ AI (paste-back)** (the
+original flow, unchanged) or **🧮 Algorithm (automatic, no AI)** — picking Algorithm hides the
+AI-only fields (travel methods, batch notes, neither of which the algorithm reads) and changes the
+action button from "Generate instructions" to "Generate routes", which runs entirely client-side
+and drops straight into the *same* `#routes-step-preview` checklist/import step the AI path uses —
+`generateRoutesByAlgorithm()` returns the same `{routes: [...]}` shape `validateRoutesResponse()`
+does (`generatedBy:'algorithm'` instead of `'ai'`), so nothing downstream (preview checklist, the
+"Edit" button opening the same route editor in `'preview'` mode, the import step, the saved-route
+provenance tag — now "🧮 Algorithm" alongside "✨ AI-generated"/"✎ Manual") needed to know which
+method produced a route.
+
+Pipeline: (1) **`kMeansCluster()`** — deterministic k-means (greedy farthest-point seeding instead
+of random, so re-clicking "Generate routes" against the same data reproduces the same clusters; a
+fixed 12 Lloyd's-algorithm iterations, no convergence check needed at this place-count scale) on
+`getEligiblePlacesForRoutes(city)`, `k = min(desired route count, ceil(eligible.length /
+stopsPerRoute))` so it never proposes more clusters than there's material for. (2)
+**`nearestNeighborOrder()`** — greedy nearest-neighbor within each cluster, starting from whichever
+member is closest to the base of operations (mirrors "every route starts/ends at base"; falls back
+to an arbitrary start when no base is set — verified this doesn't error, see below). (3)
+**`twoOptImprove()`** — a bounded path 2-opt cleanup pass (reverses a sub-segment whenever doing so
+shortens total distance, capped at 20 passes — converges well before that at the ~5-10 stop cluster
+sizes this deals with). (4) **`repairCategoryAdjacency()`** — the requested category-adjacency rule:
+`ROUTE_ALGO_BREAK_LIKE_CATS = ['food']` (a plain constant, not user-configurable in v1) flags which
+categories read as a "break" rather than a destination; if two adjacent stops both carry a
+break-like category, a local swap with the stop two positions over is tried, kept only if it
+actually resolves the adjacency without creating a new one right next to it — not a global
+re-optimization, just enough for the realistic case (a handful of same-category places scattered
+through a short route). If a base is set, it's prepended/appended as the literal first/last stop
+(same rule AI-generated routes follow) with all `interstops` gaps left empty (`{items:[]}`) — the
+algorithm doesn't guess travel type/time/cost, and `stayDuration` is left `null` for every stop for
+the same reason (unlike the AI path, there's no basis here to estimate either one; both are
+editable afterward in the route editor, same as always).
+
+**Deliberately NOT built in v1** (matches the original design sketch): rating-balancing across
+clusters — a route can still end up hoarding the higher-`wantRating` places in its geographic area,
+since k-means clusters purely on distance. Left for a follow-up once it's clear from actual use how
+lopsided that turns out to be in practice; the manual editor is already the safety net for
+rebalancing by hand in the meantime.
+
+Verified with a standalone Node harness against synthetic Copenhagen-shaped data (two geographic
+groups, food places deliberately placed adjacent in raw input order) before wiring into the UI:
+correct cluster count, every route bookended by the base, zero adjacent same-category-food stops
+across either generated route, no duplicate stops within a route, correct `interstops` shape, a
+graceful `{error}` (not a throw) for a city with fewer than 2 eligible places, and correct behavior
+with no base of operations set at all (falls back to an arbitrary cluster-member start, no crash).
 
 ⬜ **Known limitation, deferred**: interstops now live on the actual *edge* between two stops
 (fixing the earlier "`travel[]` stored on the from-stop" ambiguity — see the schema note above), so
 a reorder/remove clears exactly the affected gap(s) rather than guessing (see the reorder/remove
 math above). What's still missing is *recomputing* a correct value automatically instead of just
-clearing it. Doing that well needs either the AI to work out every affected leg (expensive/slow for
-a paste-back workflow) or, once Tier 3 (direct in-app AI calls, see "AI generation model") exists,
-an on-demand per-edge recalculation triggered by each reorder with the result cached against the
-(fromPlaceId, toPlaceId) pair so the same requery isn't repeated. Not worth building before Tier 3
-exists, and reordering isn't expected to be a frequent action in practice — flagged here rather
-than solved now.
+clearing it. **Revised now that OpenRouteService integration exists** (see above): the pieces this
+needs — a distance/time lookup keyed by `(fromPlaceId, toPlaceId, profile)` and a cache to avoid
+re-querying — already exist (`orsMatrixForProfile()`/`orsLegCache`); what's not built is the
+*automatic trigger* wiring a reorder/remove straight into a recalculation instead of requiring the
+existing manual "🧭 Calculate times & distances" click afterward. Left as a manual step deliberately
+for now (same "not worth being automatic before it's seen real use" reasoning as the OpenRouteService
+section above) — reordering isn't expected to be a frequent action in practice, and a manual button
+after the fact is one extra click, not a real workflow cost.
 
 ## Day-by-day tab (Phase 4 assignment + Phase 5 execution)
 
@@ -1407,12 +1534,27 @@ tighter access control than "anyone with the folder link").
 
 ## Preloaded location data (Phase 9, stretch)
 
-An offline script (not part of the live app) queries free sources — Wikidata/Wikipedia for
-notable places with a popularity signal (pageviews), GeoNames for city/country data — to build a
-static starting-point dataset for popular cities, bundled as a separate lazily-fetched JSON
-(not inlined into the HTML, to avoid bloating initial load). Same source (GeoNames) also backs
-city/country **autocomplete**: a preloaded list for instant, offline, rate-limit-free suggestions,
-falling back to a live Nominatim query for anything obscure not in the preloaded set.
+**Revised from the original plan**: rather than an offline script producing a bundled static JSON
+of popular places, this is now planned as an **on-demand, in-browser live query** — same three
+sources, but queried directly from the client at the moment the user asks for suggestions for a
+specific city, feeding into the same import/preview pipeline the AI-generation flow already has.
+No precomputed dataset to maintain or go stale, no separate build/publish step.
+
+Confirmed viable client-side (spiked against Copenhagen, 2026-08-13): both the Wikidata SPARQL
+endpoint (`query.wikidata.org/sparql`) and the Wikimedia pageviews REST API
+(`wikimedia.org/api/rest_v1/metrics/pageviews/...`) send `Access-Control-Allow-Origin: *`, so a
+plain browser `fetch()` works, no proxy needed — same trust model as the existing Wikipedia photo
+lookup. **Query shape matters a lot**: a naive query walking the full administrative hierarchy
+(`wdt:P131*` — "everything transitively located within Copenhagen") timed out at 65s. Switching to
+a **geographic bounding-box query** (the `wikibase:box` service, corner coordinates instead of an
+administrative-hierarchy walk) fixed that — 30 places for Copenhagen (museums, parks — Rosenborg
+Castle, Frederiksberg Gardens, Rundetaarn, Carlsberg Museum, etc.) in ~14.5s, clean results, no
+junk. Still too slow for a snappy in-app "click and wait" UX as-is (~14.5s for one city, one batch
+of types) — needs a follow-up pass (smaller bounding box, fewer `VALUES` types per query, or
+splitting into parallel per-type requests) to get comfortably under ~4s before this is worth
+wiring into the UI. Pageviews-per-article lookup (the popularity signal) is fast (~0.25s/article)
+and also CORS-open. GeoNames (city/country data + autocomplete) still needs its own free-tier
+viability check — not yet spiked.
 
 ## Offline persistence
 
@@ -1469,7 +1611,8 @@ multi-tab support alongside it, since both people may have the app open in more 
 - ✅ Category system: preset + custom `cat` tags per place, filter bar in the Places tab. No
   separate Food tab/schema — food places are just `cat:["food"]` places (see schema note above)
 - ✅ AI place generation, Tier 2 (instruction template + paste-back JSON + validation + duplicate-
-  flagged checklist preview) — see "AI generation model". Tier 3 (direct API call) is not built
+  flagged checklist preview, plus an optional bigger one-at-a-time card review with colored
+  Reject/Maybe/Approve) — see "AI generation model". Tier 3 (direct API call) is not built
 - ✅ Place source tracking (AI vs user, see places[].source above), filterable
 - ✅ "Edit trip details" (Overview tab): editable dates/cities/currency after creation (fixes AI
   generation being stuck with no city to pick if none was set at New Trip time) plus the full
@@ -1485,29 +1628,58 @@ multi-tab support alongside it, since both people may have the app open in more 
 - ✅ Place photo thumbnails via Wikipedia, expandable to a lightbox, lives in `links[]` as a
   "Thumbnail" entry rather than a separate field — editable there for any place, auto-found or
   not — see `places[].links` and `photoChecked` above
-- ✅ Delete trip and Copy trip live in the Overview tab, next to "Edit trip details" (not Manage /
-  Import — those are trip-level actions, not import/export). Delete (confirm, removes all three
-  docs; the existing `trips` onSnapshot listener handles picking a new active trip or showing the
-  empty state afterward) is a plain red button, no "danger zone" framing. Copy trip: see
-  "Duplicate trip" under Phase 7 above. Manage / Import tab itself is still just a stub — Import
-  from JSON is not built
-- ✅ Routes tab (Phase 4): AI route generation mirroring the Places AI-generation pipeline, a manual
-  route editor with a live map (also used to edit AI-generated routes — add/remove/reorder stops,
-  per-stop planning notes, unified "interstop" items — break or typed travel leg, zero-or-more per
-  gap between stops, unit-aware distance/time/cost — a weighted proximity+variety sort on the
-  add-place search, and an advanced search dialog with checkboxes and recoloring map pins for
-  picking several places at once, see "Routing / planning"). AI-generated candidate routes can be
-  edited (same editor, a `'preview'` mode) before the "Import selected" commit step. List grouped by
-  city with Edit/Delete, and an expandable per-route list+map view
-  (numbered markers + connecting line, bidirectional list/map focus). The stop sequence (compact
-  card, AI-preview checklist, expanded view, editor, Day-by-day Level 3) renders one stop per line
-  with each gap's interstop item(s) on their own indented line beneath, and shows each place's
+- ✅ Delete trip and Copy trip live in the Overview tab, next to "Edit trip details". Delete
+  (confirm, removes all three docs; the existing `trips` onSnapshot listener handles picking a new
+  active trip or showing the empty state afterward) is a plain red button, no "danger zone" framing.
+  Copy trip: see "Duplicate trip" under Phase 7 above.
+- ✅ **Import / Export (JSON)**: the old "Manage / Import" nav tab (always just a stub) is gone —
+  replaced by an "Import / Export…" dialog on the Overview tab (`#importexport-modal`), mirroring
+  the Publish/Share modal's checkbox pattern (Places / Routes & Days / Ratings & reviews) for both
+  directions instead of a dedicated tab. **Export**: builds a downloadable JSON snapshot client-side
+  (same shape as a Publish snapshot — `tripNotes.documents` never included, same rule Publish/Share
+  follows) — "Copy to clipboard" or "Download .json" (`Blob`/`URL.createObjectURL`, no server
+  involved). **Import**: paste a JSON snapshot, "Validate" parses it and reports which sections were
+  found, then per-section checkboxes (disabled for sections not present) pick what actually merges
+  into the *live* trip via "Import selected". Places are validated through `sanitizePlaceItem()` —
+  extracted from the AI place-import validator (`validateAiResponse()`) into a shared function so
+  there's one definition of "what a valid place object looks like" rather than two that could drift;
+  unlike the AI-tier2 path (which always stamps `source:{ai:true,user:false}`), a JSON-imported
+  place preserves its own `source`/`coordsSource` when present (re-importing a previously-exported,
+  already-`coordsSource:"osm"`-verified place shouldn't demote it back to needing another coordinate
+  check). Routes are deep-cloned with **freshly generated ids** (collision safety, e.g. importing
+  into the same trip it was exported from) — `stops[].placeId` references are left as-is and simply
+  render as "(unknown place)" if dangling, the same tolerance Copy Trip's routes already rely on.
+  **Days are deliberately never imported** (checkbox and all) — same reasoning as Copy Trip not
+  copying days, they're bound to a specific date range and `syncDaysToTripDates()` regenerates them
+  fresh already; the "Routes & Days" checkbox label only ever affects `routes` on the import side,
+  despite matching Publish/Share's wording for export-side consistency. Ratings & reviews import
+  merges into `tripNotes.places`/`tripNotes.routeStops` by key (`{merge:true}`), same as any other
+  `tripNotes` write.
+- ✅ Routes tab (Phase 4): route generation via either AI (paste-back, mirroring the Places
+  AI-generation pipeline) or an in-app clustering algorithm (no AI, k-means + nearest-neighbor +
+  2-opt + a category-adjacency rule — see "Routing / planning" for the full breakdown), picked via a
+  toggle in the same "Generate routes" modal — both feed the same checklist preview/import pipeline.
+  A manual route editor with a live map (also used to edit AI- or algorithm-generated routes —
+  add/remove/reorder stops, per-stop planning notes, unified "interstop" items — break or typed
+  travel leg, zero-or-more per gap between stops, unit-aware distance/time/cost — a weighted
+  proximity+variety sort on the add-place search, and an advanced search dialog with checkboxes and
+  recoloring map pins for picking several places at once, see "Routing / planning"). Generated
+  candidate routes (either method) can be edited (same editor, a `'preview'` mode) before the
+  "Import selected" commit step. List grouped by city with Edit/Delete, and an expandable per-route
+  list+map view (numbered markers + connecting line, bidirectional list/map focus), with a
+  provenance tag per card ("✨ AI-generated" / "🧮 Algorithm" / "✎ Manual"). The stop sequence
+  (compact card, preview checklist, expanded view, editor, Day-by-day Level 3) renders one stop per
+  line with each gap's interstop item(s) on their own indented line beneath, and shows each place's
   thumbnail where one exists (`routeStopThumbHtml()`) — see "Routing / planning". `normalizeRoute(route)` reads
   either the old interleaved-stops-with-per-stop-travel shape or the new places+interstops shape and
   returns a uniform `{places, interstops}` view — every renderer, the editor, and the Day-by-day tab
   go through it, so old routes display correctly without a migration step and only "upgrade" to the
-  new shape once edited and saved. Real travel-time lookups and an in-app clustering algorithm are
-  explicitly deferred
+  new shape once edited and saved.
+- ✅ Real travel-time lookups: a "🧭 Calculate times & distances" button in the route editor calls
+  OpenRouteService (Matrix API, one call per distinct travel profile in the route, rate-limited +
+  session-cached) to fill in real distance/time for walk/bike/car/taxi interstop legs — see
+  "Routing / planning". Requires `ORS_API_KEY` to be filled in (free signup, still a placeholder by
+  default); auto-running this right after route generation is deliberately not wired up yet
 - ✅ Day-by-day tab (Phase 4 assignment + Phase 5 execution): a "+ Add routes" checklist assigns
   routes to the selected day (moved here from the Routes tab, see "Day-by-day tab" above) → route
   overview (one assigned-route row per line, list+sticky map reusing the Routes tab's
@@ -1547,11 +1719,8 @@ current schema from the ground up, starting with the shell + auth.
 
 ## Open questions (genuinely undecided — flag if implementing, don't just guess)
 
-- If only one person rates a place, does that count, or does the UI nudge for both?
 - Exact JSON size/complexity where template-splitting (Phase 2) actually becomes necessary —
   no real number tested yet.
-- Whether Phase 4's AI-generated routes end up good enough that the "real algorithm" v2 is ever
-  worth building at all.
 
 ## How to request changes
 
