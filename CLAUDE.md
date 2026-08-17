@@ -89,6 +89,14 @@ spending cutoff (budget alerts are notifications, not a kill switch). Mitigation
 virtual card with a small loaded balance as a hard cap on worst-case exposure. Worth loading a
 little above the bare minimum, since card-verification holds are sometimes non-zero.
 
+**Two independent cost surfaces once Tier 3 (direct AI generation, see "AI generation model") is
+live**: Firebase Blaze itself (Cloud Functions invocations — has its own generous free tier, e.g.
+2M invocations/month, so realistic hobby-scale usage of the `generateAiContent` function should
+stay $0 regardless of the virtual card's balance) and the AI provider's own billing (Gemini API,
+via Google AI Studio — a completely separate quota/account from Firebase billing; staying on
+Gemini's free tier means AI usage never touches the Blaze card at all). The virtual-card mitigation
+above is about worst-case Firebase-side exposure specifically, not the AI provider.
+
 ## Firestore schema
 
 ```
@@ -472,6 +480,14 @@ End state after a full run: every checked place ends up with `coordsSource:"osm"
 or accepted) or is left untouched and named in the "not found" summary line — none are left sitting
 at `coordsSource:"ai"` unless the user explicitly Skipped or Stopped partway through.
 
+**Real bug fixed**: the main "📍 Check coordinates" button was wired directly as
+`addEventListener('click', startCoordsFixer)`, so the click `Event` itself got passed through as
+`startCoordsFixer`'s `explicitPlaces` parameter — truthy, so it skipped the "check everything"
+branch, then crashed on `explicitPlaces.map is not a function` since an `Event` isn't an array. This
+parameter was added later for the per-place re-check button below, which correctly wraps its call
+(`startCoordsFixer([place])`) — the main button's listener was never updated to match and broke
+outright. Fixed by wrapping it the same way: `addEventListener('click', ()=>startCoordsFixer())`.
+
 ✅ **Per-place re-check**: a "📍 Check coordinates" button next to every place in the Places list
 (alongside Edit/Delete) re-checks that one place through the exact same pipeline — same
 auto-confirm-if-≤100m-or-no-prior-coords, same manual review card otherwise — but bypasses
@@ -481,6 +497,21 @@ different branch) and wants fresh coordinates without re-running the whole trip.
 "Old: ... (label)" text and the map's gray marker tooltip describe whichever source the previous
 coordinates actually came from (`coordsSourceLabel()`) rather than always saying "AI guess", since
 this path routinely reviews non-AI-sourced places too.
+
+✅ **Paste coordinates directly**: a "📋 Paste coordinates" button next to "📍 Check coordinates" on
+every place row reveals a small inline text field for exactly what Google Maps' right-click "Copy
+coordinates" puts on the clipboard — a single `"lat, lng"` string, e.g.
+`"55.672894869554874, 12.59440710268119"` — rather than requiring the full place-edit modal's two
+separate latitude/longitude fields. Added because the modal round-trip (open Google Maps → right
+click → copy → switch back to the app → open Edit → scroll to the lat/lng fields → split the
+clipboard value across two inputs by hand) was slow for something that's really just "paste one
+string." `parseLatLngPaste()` splits on the comma, validates both halves are finite numbers within
+real lat/lng ranges (`±90`/`±180`), and rejects anything else — deliberately narrow, no N/S/E/W
+suffixes or degree-minute-second support, since that's not what this specific paste source ever
+produces. Enter in the field submits the same as clicking Save. A valid paste writes directly
+(`coords` + `coordsSource:"user"`, preserving every other field on the place) the same narrow way
+`writeConfirmedCoords()` already does for the coordinate checker's Accept action; an invalid paste
+shows an inline error next to the field rather than a blocking `alert()`.
 
 ## AI generation model
 
@@ -509,34 +540,242 @@ or mixes across sections of the same trip:
    staging in `localStorage` first. Not yet built for routes/days, and coordinates the AI supplies
    aren't cross-checked against Nominatim yet (see "Coordinates").
 
+   **Checklist rows** (`renderAiPreview()`) now carry the same richness the real Places tab list
+   does, not just a name and one-line summary: a thumbnail (see the Wikipedia pre-fetch below, blank
+   while still loading, blank-with-no-photo once checked and nothing found — same
+   `.place-thumb`/`.place-thumb-loading`/`.place-thumb-blank` classes the Places tab itself uses), a
+   "Map ↗" link, the place's first non-thumbnail link if the AI supplied one (labeled whatever the
+   AI called it — usually the official site, but not assumed to be, since the AI schema doesn't
+   guarantee that label), and a "🖼 View card" button that jumps straight into the card review dialog
+   at that specific place. **Revised from a `<label>`-wrapped row**: once links and a button needed
+   to live inside each row, a `<label>` wrapping everything meant any click — including on a link or
+   the expand button — also toggled the checkbox (the exact label-click-forwarding conflict this
+   codebase has already hit and solved elsewhere, e.g. the advanced route search's `.rs-place-row`).
+   Fixed the same way: a plain `<div class="ai-preview-row">` with its own click handler that bails
+   out on `e.target.closest('a, button, input')` before toggling the checkbox.
+
    **Optional card review** (`#ai-card-review-modal`, "🖼 Review as cards" button on the checklist
-   screen): the checklist stays the default/primary interaction — this is a bigger, roomier
-   secondary dialog that opens *on top of* the checklist for looking at candidates one at a time
-   instead of scanning a compact list, not a replacement flow. Each card shows a large photo (or a
-   dashed-border placeholder if the AI didn't supply one — most won't yet, Wikipedia lookup only
-   runs after import) at full card width, then name/wantRating/certainty, city/area, category tags,
+   screen, or "🖼 View card" on any individual row — both funnel through `openAiCardReview(startIdx)`,
+   the row version just opens at that place instead of index 0): the checklist stays the
+   default/primary interaction — this is a bigger, roomier secondary dialog that opens *on top of*
+   the checklist for looking at candidates one at a time instead of scanning a compact list, not a
+   replacement flow. Each card shows a large photo (see the Wikipedia pre-fetch below — a
+   dashed-border placeholder only for a place actually checked and found to have none, not simply
+   "not fetched yet") at full card width, then name/wantRating/certainty, city/area, category tags,
    price, hours, a coordinates-provided/not-provided line (useful context for the coordinate-check
-   step that follows import), the place's note, wishlist, and links — all in a single-column,
-   generously-spaced layout that also works on mobile (`.ai-card-review-box`, capped at 640px/94vw).
-   Three always-colored decision buttons — **✕ Reject** (red), **? Maybe** (mustard), **✓ Approve**
-   (moss) — fill solid once selected for the card on screen. Deciding is really just "check/uncheck
-   the corresponding checklist checkbox" (Reject/Approve) plus membership in an `aiPreviewMaybe`
-   `Set` for "Maybe" (which halves that place's `wantRating` — `Math.max(1, Math.round(rating/2))`
-   — at import time, on the theory that "maybe" means uncertain-but-not-a-no) — applied directly to
-   the live checklist DOM on every decision, so the two views can never drift: closing the card
-   dialog (Done, or clicking the backdrop) just re-renders the checklist to reflect whatever was
-   decided, nothing is recomputed. `sanitizePlaceItem()` — the per-item validation body extracted
-   out of `validateAiResponse()` — is the shared function behind this pipeline and the JSON Import
-   feature below, so there's one definition of "what a valid place object looks like" rather than
-   two that could drift apart.
-3. **In-app direct call** — the app calls an AI API itself. Requires a small serverless proxy
-   (Firebase Cloud Function is the natural choice, same project as everything else) that holds
-   the AI provider's API key server-side and verifies the caller's Firebase ID token before
-   forwarding the request — **the API key must never be embedded in client-side code**, unlike
-   `firebaseConfig` this one is a real secret. Tier 3 produces the exact same JSON shape as tier 2;
-   it's tier 2 with the copy-paste step automated away. ⬜ Not started — the Places generation
-   dialog has a disabled placeholder button for this, since it depends on the Cloud Function +
-   Blaze billing described in "Billing", neither of which exist yet.
+   step that follows import), the place's note, wishlist, and links — **always starting with "Map
+   ↗"** — all in a single-column, generously-spaced layout that also works on mobile
+   (`.ai-card-review-box`, capped at 640px/94vw). Three always-colored decision buttons — **✕
+   Reject** (red), **? Maybe** (mustard), **✓ Approve** (moss) — fill solid once selected for the
+   card on screen. Deciding is really just "check/uncheck the corresponding checklist checkbox"
+   (Reject/Approve) plus membership in an `aiPreviewMaybe` `Set` for "Maybe" (which halves that
+   place's `wantRating` — `Math.max(1, Math.round(rating/2))` — at import time, on the theory that
+   "maybe" means uncertain-but-not-a-no). Deciding on the *last* card closes the dialog and returns
+   to the checklist automatically, rather than leaving the user stranded on the last card needing an
+   explicit "Done" click; deciding on any earlier card just advances to the next one. The "Done —
+   back to list" button and a backdrop click both still work as a manual "I'm done early" exit too.
+   `sanitizePlaceItem()` — the per-item validation body extracted out of `validateAiResponse()` — is
+   the shared function behind this pipeline and the JSON Import feature below, so there's one
+   definition of "what a valid place object looks like" rather than two that could drift apart.
+
+   **Real bug: Reject appeared to do nothing** (checked places stayed checked). The checklist's
+   checked state was never tracked anywhere except the live DOM checkbox's own `.checked` property —
+   fine until `renderAiPreview()` (called every time the card dialog closes, to reflect whatever was
+   decided) rebuilds `#ai-preview-list`'s *entire* `innerHTML` from scratch, recomputing each row's
+   checkbox purely from duplicate-detection (`isDup`). That silently reset every checkbox back to
+   "checked unless a likely duplicate," discarding every Reject/Approve decision made in the card
+   view the moment the user returned to the checklist — the exact same bug class (checked state not
+   tracked independent of a `.innerHTML`-rebuilding render) the Routes checklist had already hit and
+   fixed via `routesPreviewChecked`. Fixed the same way: an `aiPreviewChecked` `Set`, seeded from the
+   duplicate check right after validation, is now the actual source of truth — `renderAiPreview()`
+   reads from it instead of recomputing, and `setAiPreviewChecked(idx, checked)` (mirroring this
+   app's `setRouteSearchCheck()`) is the one place that updates it, keeping the `Set` and the DOM
+   checkbox in sync regardless of which one triggered the change (a row click, a direct checkbox
+   click, or a card-view decision). `ai-import`'s "Import selected" now reads `aiPreviewChecked`
+   directly rather than querying `.ai-preview-check:checked` in the DOM, since the `Set` is the
+   thing guaranteed to be current. Verified live (not just by reasoning about the render order):
+   rejecting a place, then forcing a `renderAiPreview()` rebuild, then checking that place's actual
+   DOM checkbox — confirmed unchecked, where before the fix it would have reverted to checked.
+
+   **Photos fetched before import, not just after** (`fetchAiPreviewPhotos()`): the real Places
+   tab's Wikipedia lookup (`fetchPlacePhotoUrl()`, see "Place photo thumbnails" below) only ever ran
+   post-import, so every candidate in both the checklist and card review showed no photo at all —
+   not the point of a "big photo" card review. Reused directly against the in-memory
+   `aiPreviewPlaces` draft array (nothing written to Firestore, same `photoChecked`/`links:
+   [{label:"Thumbnail"}]` shape a saved place gets) as soon as validation succeeds, in the
+   background — re-renders whichever of the checklist/card view happens to be open as results land,
+   same "don't block on it" pattern `fetchMissingPhotos()` already uses. Because the fetched
+   `photoChecked`/`links` carry straight through into the actual imported place object (`toAdd` in
+   the import handler references the same `aiPreviewPlaces[i]`), the real `fetchMissingPhotos()`
+   correctly skips re-fetching what was already found here — not a duplicated lookup, just done
+   earlier than before.
+
+   **Two setup-screen shortcuts** (`#ai-build-and-direct-call`, `#routes-build-and-direct-call`,
+   next to "Generate instructions"): build the same instruction text (still shown on the
+   instructions screen exactly as clicking "Generate instructions" would — nothing about that step
+   is skipped, just not waited on) and immediately fire the Tier 3 call by simulating a click on the
+   instructions screen's own "✨ Generate via AI directly" button, rather than requiring the extra
+   click once there. The Routes version only shows in AI (paste-back) mode — Algorithm mode has no
+   instructions/direct-call step at all (see `setRoutesGenMethod()`).
+
+   **Real bug found and fixed**: neither `ai-build`→`ai-step-instructions` nor
+   `ai-validate`→`ai-step-preview` (nor their Routes equivalents) ever hid the *previous* step when
+   advancing — only the initial `openAiModal()`/`openRoutesModal()` and the Cancel buttons reset
+   visibility. Every step's content stayed in the DOM and visible, stacking vertically as the user
+   progressed — reported as "the card review button is bugged, shown below the validate-and-preview
+   button, partially visible," which is exactly what three unhidden steps stacked on top of each
+   other looks like (the setup form, then the full paste-back textarea and its own Validate button,
+   *then* the checklist with the card-review button, all on screen at once, several scrolls down).
+   Confirmed via a live DOM check (`classList.contains('hidden')` on all three step divs after
+   simulating each button click) before and after the fix, not just by reasoning about the CSS.
+   Fixed by explicitly hiding the step being left at every forward transition, in both modals.
+
+   **"Back" buttons, not just Cancel** (`#ai-back-2`/`#ai-back-3`, `#routes-back-2`/`#routes-back-3`,
+   next to Cancel on the instructions and preview steps of both modals): previously the only way off
+   the instructions or preview screen was Cancel, which closes the *whole* modal and discards
+   everything — no way to step back one screen while keeping what's already been built/pasted.
+   Back steps back exactly one screen (preview → instructions → setup); Cancel still fully closes,
+   unchanged. The Routes preview step's Back button has to know *which* path got there, since
+   Algorithm mode skips the instructions screen entirely (setup → preview directly) — it checks
+   `routesGenMethod` and returns to setup instead of instructions when the route was algorithm-
+   generated.
+
+   **"🖼 View card" moved to the row's far-right edge**: previously grouped inline with the Map/
+   official-site links below the place name: now its own flex item at the end of `.ai-preview-row`
+   (`align-self:center`, row's middle `<div>` carries `flex:1` so it consumes the remaining space
+   and the button sits flush against the row's right edge) — a clearer "primary row action, always
+   in the same place" position, standard for this kind of list-row-with-action-button layout.
+
+   **"Done — back to list" positioning, revised twice**: originally relied on `.modal-actions`'s
+   usual `position:sticky; bottom:0`, same as every other modal's action bar — reported showing
+   above the card content instead of pinned below it. First fix tried `position:fixed; bottom:24px;
+   right:24px`, sidestepping sticky's scroll-container/content-height fragility entirely — but
+   `fixed` positions relative to the *viewport*, not this dialog, so it rendered outside the
+   dialog's own bounds on an actual screen, and the now-empty `.modal-actions` bar was still there
+   underneath it, an empty sticky strip overlapping `#ai-card-controls`. **Final fix**: no
+   `.modal-actions` bar in this dialog at all — the button is `position:absolute; top:24px;
+   right:30px` inside `.ai-card-review-box` (which carries `position:relative` to anchor it),
+   landing in the dialog's own top-right corner next to the "Review places" title (`h3` given
+   `padding-right:170px` so a longer title would wrap around the button rather than run under it).
+   Immune to scroll position and to the fixed-vs-dialog coordinate confusion, since it's positioned
+   relative to the dialog itself either way. **Needed its own copy of `.btn-save`'s look**: that
+   button's actual background/padding/border-radius/font-weight all live under the scoped rule
+   `.modal-actions .btn-save`, not a bare `.btn-save{...}` — moving the button out of
+   `.modal-actions` silently stripped all of that, leaving an unstyled browser-default button
+   ("missing css"). Fixed by giving `#ai-card-done` its own explicit copy of the same declarations
+   rather than depending on that parent-scoped rule. `.ai-card-review-box` was also given
+   `max-height:95vh` (up from the base `.modal-box`'s `85vh`) — this dialog's content (a large photo
+   plus full place detail) routinely needs the extra room before a scrollbar should kick in.
+3. **In-app direct call** — the app calls an AI API itself. Tier 3 produces the exact same JSON
+   shape as Tier 2; it's Tier 2 with the manual "run it yourself and paste back the result" step
+   automated away, not a separate code path — `buildAiInstruction()`/`buildRoutesInstruction()`,
+   `validateAiResponse()`/`validateRoutesResponse()`, and the whole preview/checklist pipeline are
+   all unchanged and fully shared with Tier 2.
+
+   ✅ **Implemented, provider: Google Gemini**. A small Firebase Cloud Function
+   (`functions/index.js`, `generateAiContent`, a callable function) holds the Gemini API key
+   server-side (Cloud Secret Manager via `defineSecret('GEMINI_API_KEY')` — never sent to or
+   embedded in the client, unlike `firebaseConfig`/`DRIVE_API_KEY`/`ORS_API_KEY` which are
+   intentionally public) and forwards a prompt to `generateContent` on `gemini-3.5-flash-lite`
+   (free-tier eligible as of this writing — bump the model id in the function if Google
+   retires/renames it; check ai.google.dev/gemini-api/docs/pricing for current free-tier options).
+   **Revised within days of first deploy**: originally shipped as `gemini-2.5-flash-lite`, which
+   started 404ing for this key almost immediately — "This model models/gemini-2.5-flash-lite is no
+   longer available to new users. Please update your code to use models/gemini-3.5-flash-lite."
+   Google's own error response named the exact fix, so the model id is now `gemini-3.5-flash-lite`.
+   Worth treating `GEMINI_MODEL` as something to actually check periodically rather than "set once
+   and forget" — this suggests Gemini's free-tier model lineup churns faster than the constant's own
+   original comment assumed.
+   **Why Gemini over OpenRouter or Anthropic directly**: no separate account/billing surface beyond
+   Firebase's own (Google AI Studio key, same Google account), a real free tier with generous
+   limits for a 2-person hobby app (~15 RPM / 1000 requests/day on Flash-Lite), and it's a
+   purpose-built model rather than OpenRouter's rotating pool of smaller free community models. The
+   tradeoff, made knowingly: Gemini's *free* tier lets Google use submitted content to improve its
+   products (human-reviewable) — the *paid* tier doesn't. Worth revisiting if that becomes a
+   concern; the Cloud Function's provider call is isolated to one small file, so swapping providers
+   later doesn't touch the client.
+
+   **Auth/authorization, not just "signed in"**: a callable function (`onCall`, not a plain HTTPS
+   endpoint) gets `request.auth` populated automatically once the Firebase client SDK's ID token is
+   verified — but per "Security model" above, being signed in via Firebase Auth doesn't mean being
+   *allowed*; the allowlist is the real gate, normally enforced by `firestore.rules`, which doesn't
+   protect a Cloud Function at all. So `generateAiContent` re-checks the caller's email against
+   `config/allowlist` itself (a `get()` via the Admin SDK, which bypasses security rules — the same
+   cross-document pattern `firestore.rules` already uses) before doing anything else, mirroring the
+   Firestore-side check rather than trusting "signed in" alone.
+
+   **Response handling**: Gemini sometimes wraps JSON in a ` ```json ` fence despite the prompt's
+   explicit "no markdown, no code fences" instruction — a human pasting by hand into Tier 2 can just
+   delete it, but there's no human in this loop, so the function strips a wrapping fence
+   defensively (`stripCodeFence()`) before returning text, rather than pushing that special case
+   onto the client's existing `JSON.parse()`-based validators. A non-`STOP` `finishReason` (safety
+   block, hit `MAX_TOKENS`, etc.) is surfaced as a specific error rather than returning a truncated
+   string that would just fail validation with no useful explanation.
+
+   **Client side**: a "✨ Generate via AI directly" button next to "Copy to clipboard" on the
+   instructions screen (both Places and Routes generation) calls `generateAiContent` with the same
+   instruction text already built for Tier 2, drops the returned text straight into the same
+   paste-back textarea, and clicks the same Validate button programmatically — landing on the exact
+   same preview/checklist/card-review screen a manual paste would. On any failure (not
+   signed in/allowlisted, network error, Gemini error) the button re-enables and shows a message;
+   the paste-back textarea and manual flow are still right there as a fallback, always. While
+   waiting, the status line next to the button shows a small CSS spinner (`.spinner`, a bordered
+   circle animated via `@keyframes spin`) plus "Generating with AI…" — cleared on both the success
+   path (overwritten by the "Generated — reviewing the response now." message) and the error path
+   (explicitly cleared before the error message is written to the separate error line, so a failure
+   can't leave it spinning forever). One `callAiDirect()` implementation backs both the
+   instructions-screen button and the setup-screen shortcut below, so the spinner covers both entry
+   points automatically.
+
+   **Deploy**: `firebase.json`/`.firebaserc` at the repo root point at the `functions/` codebase
+   (Node 22 runtime). Required, one-time, outside this repo: (1) the Firebase project on the Blaze
+   plan (see "Billing" — Cloud Functions cannot run on Spark at all), (2) a Gemini API key from
+   Google AI Studio, set as a Cloud Functions secret via `firebase functions:secrets:set
+   GEMINI_API_KEY` (run interactively, so the raw key value never has to be pasted anywhere else),
+   then `firebase deploy --only functions`. Both are done — **deployed and live**
+   (`generateAiContent`, v2 callable, `us-central1`, Node 22 — confirmed via `firebase
+   functions:list`). Also ran `firebase functions:artifacts:setpolicy` (1-day image retention) once
+   deployed, since Gen 2 functions otherwise accumulate container images in Artifact Registry
+   indefinitely — a small but real ongoing storage cost the CLI itself warns about post-deploy.
+
+   **Real bug caught at first deploy attempt**: `admin.firestore()` (the old namespaced
+   `firebase-admin` API) threw `TypeError: admin.firestore is not a function` during Firebase's
+   pre-deploy source analysis — `firebase-admin` v14 (the version actually installed) dropped that
+   surface in favor of the modular API. Fixed by switching to `const { initializeApp } =
+   require('firebase-admin/app')` / `const { getFirestore } = require('firebase-admin/firestore')`.
+   Worth remembering for any future Cloud Function in this project: don't assume the classic
+   `admin.X()` namespaced style still works, check which major version is actually installed.
+
+   Verified end-to-end before handing back for in-browser testing: `node --check` on the function
+   file; an initial `firebase deploy --only functions` attempt (before Blaze/the secret existed)
+   correctly got as far as the Blaze-plan gate, confirming `firebase.json`/`.firebaserc`/
+   `functions/package.json` were valid; after the fix above, deploy succeeded; and an
+   **unauthenticated smoke test** (`curl` directly against the function's HTTPS trigger URL, no ID
+   token) correctly returned `401` / `{"error":{"status":"UNAUTHENTICATED"}}` rather than crashing
+   — confirms the deployed code runs and the auth check works. A full authenticated generation
+   (as a signed-in, allowlisted user, through the actual UI) still needs manual testing in the
+   browser — that part needs a real Firebase Auth session, which can't be done from the CLI.
+
+⬜ **Idea, blocked on Tier 3 — "Ask AI about this place"**: a per-place action, visible both in the
+Places tab and in Day-by-day's single-stop execution view (Level 3, the review screen), that lets
+the user ask the AI to say more about the place or fact-check the data already saved for it (hours,
+price, whether it's still open, etc.) — a live, on-demand call, so it needs Tier 3's Cloud Function
+proxy to exist first; doesn't fit the paste-back model. Not designed beyond the concept yet — open
+questions: what UI (a modal? an inline expand?), what gets sent to the AI (just the place's saved
+fields, or also live web search/grounding — a real fact-check needs the latter, since the AI's own
+training data can't confirm current hours), and how a response should be surfaced (freeform text?
+specific flagged discrepancies against the saved fields?).
+
+⬜ **Idea, blocked on Tier 3 — "What's nearby?"**: an ad-hoc query for when the user wants to do
+something off-route or spontaneous, reachable from Day-by-day (and possibly Places) — free text like
+"I want to eat burgers or pizza nearby" or "I want to see X", answered by combining two sources: (1)
+the trip's own saved places within a configurable radius (default e.g. 1km, adjustable) of wherever
+the user currently is in the plan, and (2) live AI-suggested general options nearby, not limited to
+what's already saved (same web-search/grounding question as "Ask AI about this place" above). Results
+get an "add to route" and/or "add to places" action. Not designed beyond the concept — open
+questions: exact UI entry point, how "current location" is derived when the user isn't mid-route,
+and how a chosen result gets reconciled into `places[]`/a route's `stops[]` (a new place entry?
+inserted directly as a stop?).
 
 All three tiers feed the same validation → preview → edit pipeline. The full new-trip Draft flow
 below (staging in `localStorage` before an explicit "Save trip") isn't built yet; the places-only
@@ -1140,6 +1379,29 @@ still "yesterday" in UTC). Fixed to read back the date with the same local gette
 (`getFullYear`/`getMonth`/`getDate`) used to construct it, matching how `todayIso()` already did
 this correctly — never mix `toISOString()` with locally-constructed dates in this codebase.
 
+✅ **Implemented: "🔍 Nearby places"** (`#nearby-places-modal`, next to "+ Add routes" on Level 2) —
+for something spontaneous, off the planned route, not requiring AI. Finds the trip's own saved
+places within an adjustable radius (default 1km) of a location, optionally narrowed by a
+multi-select category filter, live map (numbered-marker style reused from the advanced route
+search: mustard for the search location, harbor-tinted circle for the radius, moss markers for
+matches — clicking the map moves the search location). **Location defaults to the browser's own
+geolocation** (`navigator.geolocation`, tried automatically on open) — the one place in the app
+that uses real device location rather than a saved coordinate, since "what's near me right now"
+is the actual question being asked, unlike everywhere else in the app which reasons about saved
+place coordinates. Falls back to the trip's base of operations if permission is denied/unavailable,
+and always overridable by clicking anywhere on the map.
+
+**Reuses `tripData.routes[]` as-is for the result — no new data structure.** A route doesn't require
+a minimum stop count (a 1-stop route simply has zero `interstops` gaps), so "+ Add to today" on a
+result creates a plain route with that single place as its only stop
+(`generatedBy:'manual'`) and appends its id to the current day's `assignedRoutes`, exactly the same
+mechanism every other route uses. Rating/review, done-marking, and Day-by-day's Level 2/3 rendering
+all already work on this without any special-casing, since none of that code assumes a route has
+more than one stop — `tripNotes.routeStops["<routeId>:0"]` is the review entry for it, same shape
+as any route stop. The dialog deliberately stays open after adding (no auto-close) — a spontaneous
+"what's around me" search often wants more than one result added in one sitting — with each row
+getting its own inline "✓ Added" instead.
+
 ⬜ **Deliberately deferred**: reaching Level 3 the first time is still manual (tap a stop) — no
 auto-navigation into the next undone stop's detail on entry, only Prev/Next once already inside
 Level 3. A real transition leg between two routes assigned to the same day is shown as a plain
@@ -1328,15 +1590,27 @@ minimize/maximize for the map (maximize-list hides the map entirely, maximize-ma
 65vh). Map plots every place with `coords`, popup with
 name/city/area/wantRating. Clicking a place row focuses/pans the map to its marker and opens the
 popup (revealing the map pane if currently maximized-list); clicking a marker scrolls to and
-briefly highlights the corresponding list row, clearing active category/source/search filters first
-if they'd otherwise hide it (revealing the list pane if currently maximized-map). Not yet
+briefly highlights the corresponding list row, clearing active category/source/coords/search filters
+first if they'd otherwise hide it (revealing the list pane if currently maximized-map). Not yet
 generalized to other tabs/content — this is Places-specific, not the fully generic Phase 6 view.
 The list pane's "Places" header shows a live count next to it — just `(N)` normally, `(N of total)`
-while a category/source/search filter narrows the list. A search box above the category chips
-filters by space-separated keywords (all must match — AND, not OR), case-insensitive, against
+while a category/source/coords/search filter narrows the list. A search box above the category
+chips filters by space-separated keywords (all must match — AND, not OR), case-insensitive, against
 `JSON.stringify(place).toLowerCase()` rather than named fields — simplest way to search
 "everything" (name, city, area, note, wishlist, links, category tags, etc.) without hand-picking
-and maintaining a field list.
+and maintaining a field list. A third chip row, **"📍 No coordinates (N)"** (`placesCoordsFilter`,
+`#coords-filter`), narrows the list to places with no `coords` at all — self-hides when every place
+has coordinates. Distinct from the coordinate-checker's own broader `coordsNeedsCheck()` (which also
+flags `coordsSource:"ai"` places as needing a check) — this filter is specifically "completely
+missing," for spotting places that need a first pass, not a re-verification.
+
+A **"Sort by"** dropdown (`placesSortBy`, `#places-sort`) above the filters picks the list order,
+independent of whatever filters are active: **Want rating** (high→low, the original always-on
+default), **Name** (A→Z), **Price** (low→high, a place with no price amount sorts last either way —
+raw `price.amount`, not currency-converted, so it's only truly "cheapest first" within one currency;
+a trip mixing currencies won't sort perfectly by real cost), and **Recently added** (newest first —
+`places[]` is always insertion-ordered since new places are only ever appended, never reordered, so
+a place's array index doubles as its "added" order with no separate `createdAt` field needed).
 
 ## Multi-user sharing (Phase 7)
 
@@ -1612,7 +1886,14 @@ multi-tab support alongside it, since both people may have the app open in more 
   separate Food tab/schema — food places are just `cat:["food"]` places (see schema note above)
 - ✅ AI place generation, Tier 2 (instruction template + paste-back JSON + validation + duplicate-
   flagged checklist preview, plus an optional bigger one-at-a-time card review with colored
-  Reject/Maybe/Approve) — see "AI generation model". Tier 3 (direct API call) is not built
+  Reject/Maybe/Approve) and Tier 3 (a "✨ Generate via AI directly" button calls a Firebase Cloud
+  Function backed by the Gemini API — same instruction/validation pipeline as Tier 2, just without
+  the manual copy-paste step) for both Places and Routes generation — see "AI generation model".
+  **Deployed and live** (`generateAiContent`, v2 callable, `us-central1`, Node 22) — smoke-tested
+  unauthenticated (correctly returns 401/`UNAUTHENTICATED` rather than crashing); a full
+  authenticated end-to-end generation still needs manual in-browser testing as a signed-in
+  allowlisted user. Artifact Registry cleanup policy set (1-day image retention) to avoid
+  accumulating container-image storage costs across future deploys.
 - ✅ Place source tracking (AI vs user, see places[].source above), filterable
 - ✅ "Edit trip details" (Overview tab): editable dates/cities/currency after creation (fixes AI
   generation being stuck with no city to pick if none was set at New Trip time) plus the full
@@ -1681,7 +1962,10 @@ multi-tab support alongside it, since both people may have the app open in more 
   "Routing / planning". Requires `ORS_API_KEY` to be filled in (free signup, still a placeholder by
   default); auto-running this right after route generation is deliberately not wired up yet
 - ✅ Day-by-day tab (Phase 4 assignment + Phase 5 execution): a "+ Add routes" checklist assigns
-  routes to the selected day (moved here from the Routes tab, see "Day-by-day tab" above) → route
+  routes to the selected day (moved here from the Routes tab, see "Day-by-day tab" above), plus a
+  "🔍 Nearby places" dialog next to it (browser geolocation + radius + category filter over the
+  trip's saved places, adds a result as a single-stop route on the current day — no new data
+  structure needed, see "Day-by-day tab" above) → route
   overview (one assigned-route row per line, list+sticky map reusing the Routes tab's
   expandable-view code, with reorder/remove, full Places-tab-level detail per stop via the shared
   `placeDetailHtml()`) → single-stop execution view (same full detail plus an interactive wishlist

@@ -1,0 +1,13 @@
+{
+  "name": "trip-planner-functions",
+  "description": "Server-side AI proxy for trip-planner's Tier 3 direct AI generation (see CLAUDE.md, \"AI generation model\")",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^14.0.0",
+    "firebase-functions": "^7.0.0"
+  }
+}

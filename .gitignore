@@ -1,0 +1,16 @@
+# Secrets — never commit these
+.apikey
+.env.local
+*.local
+
+# Firebase CLI local state
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# Leftover/unused tooling artifacts
+.npm-cache/
+.vite/
+
+# Editor/agent config
+.claude/

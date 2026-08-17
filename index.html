@@ -215,13 +215,20 @@
   .place-actions button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
   .edit-row{margin-top:10px; border-top:1px dashed var(--line); padding-top:8px;}
   .js-place-note{width:100%; min-height:34px; resize:vertical; font-size:.82rem; background:#FBFAF6; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-family:'Inter',sans-serif;}
+  /* Quick "paste from Google Maps" coordinate entry (per-place row, Places tab) — a right-click on
+     a spot in Google Maps offers "Copy coordinates" as a single "lat, lng" string; this parses that
+     directly rather than routing through the full Edit modal's two separate lat/lng fields. */
+  .paste-coords-row{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px;}
+  .paste-coords-row input{flex:1; min-width:180px; font-size:.82rem; padding:6px 9px; border:1px solid var(--line); border-radius:6px; font-family:'JetBrains Mono',monospace;}
+  .paste-coords-row button{font-size:.76rem; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer;}
+  .paste-coords-error{color:var(--red); font-size:.76rem; flex-basis:100%;}
 
   /* AI preview checklist — used for the AI place/route import previews, the Copy Trip places
      checklist, and the Day-by-day "Add routes" checklist. Requalified with .modal-box (0,2,0),
      same fix as .publish-check-row's history: a bare .ai-preview-row{display:flex} (0,1,0) loses
      to the pre-existing .modal-box label{display:block} rule (0,1,1) on specificity alone, which
      silently stacked the checkbox above its row content instead of beside it. */
-  .modal-box .ai-preview-row{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
+  .modal-box .ai-preview-row{display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); cursor:pointer;}
   .ai-preview-row:last-child{border-bottom:none;}
   .ai-preview-row input[type=checkbox]{margin-top:3px; width:16px; height:16px; accent-color:var(--harbor); cursor:pointer; flex-shrink:0;}
   .ai-preview-row .place-meta{margin-top:1px;}
@@ -231,7 +238,10 @@
      that stacks on top of the checklist preview (#ai-step-preview) for a one-at-a-time look at
      each candidate before deciding. Decisions sync back into the checklist's own checkboxes, so
      the checklist stays the single source of truth for what actually gets imported. */
-  .ai-card-review-box{width:640px; max-width:94vw;}
+  /* max-height wider than the base .modal-box's 85vh — this dialog's content (a large photo plus
+     full place detail) routinely needs more room than that before a scrollbar kicks in. */
+  .ai-card-review-box{width:640px; max-width:94vw; position:relative; max-height:95vh;}
+  .ai-card-review-box h3{padding-right:170px;}
   #ai-card-content{margin:14px 0;}
   .ai-card-photo{width:100%; max-height:320px; object-fit:cover; border-radius:12px; display:block;}
   .ai-card-photo-blank{width:100%; height:170px; border-radius:12px; border:1px dashed var(--line); background:var(--paper-raised); color:var(--ink-soft); display:flex; align-items:center; justify-content:center; font-size:.85rem;}
@@ -249,6 +259,26 @@
   @media (max-width: 600px){
     .ai-card-review-box{width:100%; max-width:100vw;}
   }
+  /* Revised twice: first tried .modal-actions' usual position:sticky (bottom bar, like every other
+     modal) — broke, showing above the card content instead of pinned below it. Then tried
+     position:fixed to the viewport corner to sidestep sticky's scroll-container/content-height
+     fragility entirely — but fixed positions relative to the VIEWPORT, not this dialog, so on a
+     narrower/differently-scrolled page it rendered outside the dialog's own bounds, and the now-
+     button-less .modal-actions bar was still there, an empty sticky strip overlapping
+     #ai-card-controls underneath it. Fixed properly: no modal-actions bar at all here — the button
+     is absolutely positioned in the dialog's own top-right corner (.ai-card-review-box carries
+     position:relative to anchor it), where there's already visual room next to the "Review places"
+     title, immune to both scroll position AND viewport-vs-dialog coordinate confusion. */
+  /* .btn-save's actual look (background/padding/radius/font-weight) lives entirely under
+     .modal-actions .btn-save — this button doesn't sit inside a .modal-actions anymore, so it needs
+     its own copy of that same look rather than inheriting it. */
+  #ai-card-done{position:absolute; top:24px; right:30px; z-index:5; padding:9px 16px; border-radius:8px; font-weight:600; font-size:.88rem; cursor:pointer; background:var(--ink); color:var(--paper); border:none;}
+
+  /* Tier 3 "Generate via AI directly" loading spinner — small, inline, dropped into the status
+     span next to the button (both the instructions-screen button and the setup-screen shortcut
+     funnel through the same callAiDirect(), so one spinner covers both entry points). */
+  .spinner{display:inline-block; width:13px; height:13px; border:2px solid var(--line); border-top-color:var(--harbor); border-radius:50%; vertical-align:middle; margin-right:6px; animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
 
   /* Category chips */
   .cat-picker{display:flex; flex-wrap:wrap; gap:6px;}
@@ -342,8 +372,18 @@
             <button type="button" class="pane-maximize-btn" data-mode="list" title="Maximize list">⤢</button>
           </div>
           <input type="text" id="places-search" placeholder="Search places… (space-separated keywords, matches anything)" autocomplete="off" style="width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; margin-bottom:10px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <label for="places-sort" style="margin:0; font-size:.8rem; color:var(--ink-soft);">Sort by</label>
+            <select id="places-sort" style="flex:1;">
+              <option value="want">Want rating (high to low)</option>
+              <option value="name">Name (A–Z)</option>
+              <option value="price">Price (low to high)</option>
+              <option value="added">Recently added</option>
+            </select>
+          </div>
           <div id="cat-filter" class="cat-picker" style="margin-bottom:10px;"></div>
-          <div id="source-filter" class="cat-picker" style="margin-bottom:16px;"></div>
+          <div id="source-filter" class="cat-picker" style="margin-bottom:10px;"></div>
+          <div id="coords-filter" class="cat-picker" style="margin-bottom:16px;"></div>
           <div id="coords-fixer-card" class="hidden"></div>
           <div id="places-list"></div>
         </div>
@@ -373,7 +413,10 @@
         <select id="days-day-select"></select>
       </div>
       <div id="days-route-picker" class="days-route-picker" style="margin-bottom:12px;"></div>
-      <button type="button" class="btn-small" id="btn-days-add-routes" style="margin-bottom:16px;">+ Add routes</button>
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+        <button type="button" class="btn-small" id="btn-days-add-routes">+ Add routes</button>
+        <button type="button" class="btn-small" id="btn-days-nearby-places">🔍 Nearby places</button>
+      </div>
       <div id="days-content"></div>
     </section>
     <section class="panel" id="p-budget">
@@ -731,6 +774,7 @@
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="ai-cancel-1">Cancel</button>
+        <button class="btn-small" id="ai-build-and-direct-call">✨ Generate with AI directly</button>
         <button class="btn-save" id="ai-build">Generate instructions</button>
       </div>
     </div>
@@ -740,12 +784,14 @@
       <textarea id="ai-instructions" readonly style="min-height:180px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
       <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
         <button type="button" class="btn-small" id="ai-copy">Copy to clipboard</button>
-        <button type="button" class="btn-small" id="ai-direct-call" disabled title="Requires a server-side AI proxy (Firebase Cloud Function) — not set up yet">Generate via AI directly (coming soon)</button>
+        <button type="button" class="btn-small" id="ai-direct-call">✨ Generate via AI directly</button>
+        <span id="ai-direct-status" class="place-meta"></span>
       </div>
-      <label for="ai-response" style="margin-top:20px;">Paste the AI's JSON response here</label>
+      <label for="ai-response" style="margin-top:20px;">Paste the AI's JSON response here (or use "Generate via AI directly" above to skip this)</label>
       <textarea id="ai-response" placeholder="[ { &quot;name&quot;: ... }, ... ]" style="min-height:140px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
       <div id="ai-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
       <div class="modal-actions">
+        <button class="btn-small" id="ai-back-2">← Back</button>
         <button class="btn-cancel" id="ai-cancel-2">Cancel</button>
         <button class="btn-save" id="ai-validate">Validate &amp; preview</button>
       </div>
@@ -758,6 +804,7 @@
       </div>
       <div id="ai-preview-list"></div>
       <div class="modal-actions">
+        <button class="btn-small" id="ai-back-3">← Back</button>
         <button class="btn-cancel" id="ai-cancel-3">Cancel</button>
         <button class="btn-save" id="ai-import">Import selected</button>
       </div>
@@ -768,6 +815,7 @@
 <!-- ============ AI PLACE CARD REVIEW (opens on top of ai-modal) ============ -->
 <div id="ai-card-review-modal" class="modal-backdrop hidden">
   <div class="modal-box ai-card-review-box">
+    <button type="button" class="btn-save" id="ai-card-done">Done — back to list</button>
     <h3>Review places</h3>
     <p class="hint" id="ai-card-progress"></p>
     <div id="ai-card-content"></div>
@@ -776,9 +824,6 @@
       <button type="button" class="btn-small ai-card-decision" id="ai-card-reject">✕ Reject</button>
       <button type="button" class="btn-small ai-card-decision" id="ai-card-maybe">? Maybe</button>
       <button type="button" class="btn-small ai-card-decision" id="ai-card-approve">✓ Approve</button>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-save" id="ai-card-done">Done — back to list</button>
     </div>
   </div>
 </div>
@@ -831,6 +876,7 @@
       <p id="routes-eligible-hint" class="hint" style="margin-top:4px;"></p>
       <div class="modal-actions">
         <button class="btn-cancel" id="routes-cancel-1">Cancel</button>
+        <button class="btn-small" id="routes-build-and-direct-call">✨ Generate with AI directly</button>
         <button class="btn-save" id="routes-build">Generate instructions</button>
       </div>
     </div>
@@ -840,11 +886,14 @@
       <textarea id="routes-instructions" readonly style="min-height:180px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
       <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
         <button type="button" class="btn-small" id="routes-copy">Copy to clipboard</button>
+        <button type="button" class="btn-small" id="routes-direct-call">✨ Generate via AI directly</button>
+        <span id="routes-direct-status" class="place-meta"></span>
       </div>
-      <label for="routes-response" style="margin-top:20px;">Paste the AI's JSON response here</label>
+      <label for="routes-response" style="margin-top:20px;">Paste the AI's JSON response here (or use "Generate via AI directly" above to skip this)</label>
       <textarea id="routes-response" placeholder="[ { &quot;label&quot;: ... }, ... ]" style="min-height:140px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
       <div id="routes-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
       <div class="modal-actions">
+        <button class="btn-small" id="routes-back-2">← Back</button>
         <button class="btn-cancel" id="routes-cancel-2">Cancel</button>
         <button class="btn-save" id="routes-validate">Validate &amp; preview</button>
       </div>
@@ -854,6 +903,7 @@
       <p class="hint" style="margin-bottom:10px;">Review before importing.</p>
       <div id="routes-preview-list"></div>
       <div class="modal-actions">
+        <button class="btn-small" id="routes-back-3">← Back</button>
         <button class="btn-cancel" id="routes-cancel-3">Cancel</button>
         <button class="btn-save" id="routes-import">Import selected</button>
       </div>
@@ -919,6 +969,41 @@
     <div class="modal-actions">
       <button class="btn-cancel" id="ar-cancel">Cancel</button>
       <button class="btn-save" id="ar-add">Add selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ NEARBY PLACES (Day-by-day) ============ -->
+<div id="nearby-places-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:1140px; max-width:95vw;">
+    <h3>Nearby places</h3>
+    <p class="hint">Finds places already saved in this trip within a radius of a location — for
+      something spontaneous, not necessarily on today's planned route. Adding one creates a
+      single-stop route for it and assigns it to the currently selected day, same as any other route
+      (it'll show up in Day-by-day with the same rating/review support).</p>
+    <p id="np-location-status" class="place-meta" style="margin:8px 0;"></p>
+    <div class="modal-grid" style="margin-bottom:10px;">
+      <div>
+        <label for="np-radius">Distance (km)</label>
+        <input type="number" id="np-radius" min="0.1" step="0.1" value="1">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button type="button" class="btn-small" id="np-use-my-location" style="display:block;">📍 Use my location</button>
+      </div>
+    </div>
+    <div id="np-cat-filter" class="cat-picker" style="margin-bottom:12px;"></div>
+    <div id="np-split" style="display:flex; gap:16px; align-items:flex-start;">
+      <div id="np-list-pane" style="flex:1; min-width:0;">
+        <div id="np-list"></div>
+      </div>
+      <div id="np-map-pane" style="flex:1; min-width:0; position:sticky; top:16px;">
+        <div class="route-map-container" id="np-map"></div>
+        <p class="hint" style="margin-top:6px;">Click the map to search from a different point.</p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="np-close">Close</button>
     </div>
   </div>
 </div>
@@ -1202,6 +1287,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
 
 <script>
 // =========================================================================
@@ -1220,6 +1306,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+const cloudFunctions = firebase.functions();
 db.enablePersistence({synchronizeTabs: true}).catch(err=>{
   console.warn('Offline persistence not enabled:', err.code);
 });
@@ -2521,6 +2608,7 @@ function isPlaceHiddenByFilters(place){
   if(placesCatFilter === UNCATEGORIZED) return (place.cat||[]).length > 0;
   if(placesCatFilter && !(place.cat||[]).includes(placesCatFilter)) return true;
   if(placesSourceFilter && !place.source?.[placesSourceFilter]) return true;
+  if(placesCoordsFilter && place.coords) return true;
   if(!placeMatchesSearch(place)) return true;
   return false;
 }
@@ -2542,6 +2630,7 @@ function focusListOnPlace(idx){
   if(place && isPlaceHiddenByFilters(place)){
     placesCatFilter = null;
     placesSourceFilter = null;
+    placesCoordsFilter = false;
     placesSearchQuery = '';
     document.getElementById('places-search').value = '';
     renderPlaces();
@@ -2673,6 +2762,50 @@ document.getElementById('source-filter').addEventListener('click', e=>{
   renderPlaces();
 });
 
+let placesCoordsFilter = false; // false = show all, true = only places with no coords at all
+
+function renderCoordsFilter(){
+  const el = document.getElementById('coords-filter');
+  const places = tripData?.places || [];
+  const missingCount = places.filter(p=>!p.coords).length;
+  if(!missingCount){ el.innerHTML = ''; placesCoordsFilter = false; return; }
+  el.innerHTML = `<button type="button" class="cat-chip ${!placesCoordsFilter?'active':''}" data-missing="">All</button>
+    <button type="button" class="cat-chip ${placesCoordsFilter?'active':''}" data-missing="1">📍 No coordinates (${missingCount})</button>`;
+}
+document.getElementById('coords-filter').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  placesCoordsFilter = !!btn.dataset.missing;
+  renderPlaces();
+});
+
+let placesSortBy = 'want'; // 'want' | 'name' | 'price' | 'added'
+// withIdx entries are {p, i} — i is the place's position in tripData.places, which is always
+// insertion order (new places are appended, never reordered), so it doubles as "added" order
+// without needing a separate createdAt field on each place.
+function sortPlacesList(withIdx){
+  const arr = withIdx.slice();
+  if(placesSortBy === 'name') return arr.sort((a,b)=>(a.p.name||'').localeCompare(b.p.name||''));
+  if(placesSortBy === 'added') return arr.sort((a,b)=>b.i-a.i); // most recently added first
+  if(placesSortBy === 'price'){
+    // Raw amount, not currency-converted — sorts correctly within one currency (the common case
+    // for a single-city/single-currency trip), but a mix of currencies won't be truly cheapest-
+    // to-priciest. A place with no price amount at all sorts to the end either way.
+    return arr.sort((a,b)=>{
+      const pa = a.p.price?.amount, pb = b.p.price?.amount;
+      if(pa == null && pb == null) return 0;
+      if(pa == null) return 1;
+      if(pb == null) return -1;
+      return pa - pb;
+    });
+  }
+  return arr.sort((a,b)=>(b.p.wantRating||0)-(a.p.wantRating||0)); // 'want' (default)
+}
+document.getElementById('places-sort').addEventListener('change', e=>{
+  placesSortBy = e.target.value;
+  renderPlaces();
+});
+
 function sourceIcons(source){
   if(!source) return '';
   const icons = [];
@@ -2684,6 +2817,7 @@ function sourceIcons(source){
 function renderPlaces(){
   renderCatFilter();
   renderSourceFilter();
+  renderCoordsFilter();
   updateCoordsPendingBadge();
   const el = document.getElementById('places-list');
   const all = tripData?.places || [];
@@ -2696,11 +2830,14 @@ function renderPlaces(){
   if(placesSourceFilter){
     withIdx = withIdx.filter(({p})=>p.source?.[placesSourceFilter]);
   }
+  if(placesCoordsFilter){
+    withIdx = withIdx.filter(({p})=>!p.coords);
+  }
   if(placesSearchQuery.trim()){
     withIdx = withIdx.filter(({p})=>placeMatchesSearch(p));
   }
   const filtered = withIdx;
-  const anyFilterActive = placesCatFilter || placesSourceFilter || placesSearchQuery.trim();
+  const anyFilterActive = placesCatFilter || placesSourceFilter || placesCoordsFilter || placesSearchQuery.trim();
   document.getElementById('places-count').textContent = anyFilterActive
     ? `(${filtered.length} of ${all.length})` : `(${all.length})`;
   if(!filtered.length){
@@ -2708,7 +2845,7 @@ function renderPlaces(){
     return;
   }
 
-  const ordered = filtered.slice().sort((a,b)=>(b.p.wantRating||0)-(a.p.wantRating||0));
+  const ordered = sortPlacesList(filtered);
   el.innerHTML = ordered.map(({p, i})=>{
     const id = p.id || slugify(p.name);
     const note = tripNotes.places[id] || { note:'' };
@@ -2741,7 +2878,14 @@ function renderPlaces(){
           <div class="place-actions">
             <button class="js-edit-place" data-idx="${i}">Edit</button>
             <button class="js-check-place-coords" data-idx="${i}">📍 Check coordinates</button>
+            <button class="js-paste-coords-toggle" data-idx="${i}">📋 Paste coordinates</button>
             <button class="js-delete-place" data-idx="${i}">Delete</button>
+          </div>
+          <div class="paste-coords-row hidden" data-idx="${i}">
+            <input type="text" class="js-paste-coords-input" data-idx="${i}" placeholder="Paste from Google Maps, e.g. 55.6736, 12.5681">
+            <button type="button" class="js-paste-coords-save" data-idx="${i}">Save</button>
+            <button type="button" class="js-paste-coords-cancel" data-idx="${i}">Cancel</button>
+            <span class="paste-coords-error" data-idx="${i}"></span>
           </div>
           <div class="edit-row" data-placeid="${id}">
             <textarea class="js-place-note" placeholder="Plan note (reservation reminders, preferences...)">${(note.note||'').replace(/</g,'&lt;')}</textarea>
@@ -2756,13 +2900,65 @@ function renderPlaces(){
   fetchMissingPhotos();
 }
 
+// Accepts exactly what Google Maps' right-click "Copy coordinates" puts on the clipboard —
+// "lat, lng" as two comma-separated decimal numbers, e.g. "55.672894869554874, 12.59440710268119"
+// — rather than the two-separate-fields entry the full place edit modal requires. Deliberately
+// narrow: no N/S/E/W suffixes, no degree-minute-second support, since that's not what this
+// specific paste source ever produces.
+function parseLatLngPaste(str){
+  const parts = (str||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(parts.length !== 2) return null;
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if(lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function closePasteCoordsRow(idx){
+  const row = document.querySelector(`.paste-coords-row[data-idx="${idx}"]`);
+  if(!row) return;
+  row.classList.add('hidden');
+  row.querySelector('.js-paste-coords-input').value = '';
+  row.querySelector('.paste-coords-error').textContent = '';
+}
+
+async function savePastedCoords(idx){
+  const row = document.querySelector(`.paste-coords-row[data-idx="${idx}"]`);
+  const input = row.querySelector('.js-paste-coords-input');
+  const errEl = row.querySelector('.paste-coords-error');
+  const parsed = parseLatLngPaste(input.value);
+  if(!parsed){
+    errEl.textContent = 'Could not parse — expected "lat, lng", e.g. 55.6736, 12.5681.';
+    return;
+  }
+  errEl.textContent = '';
+  // Same narrow, preserve-everything-else write as writeConfirmedCoords() (the coordinate
+  // checker's Accept action) — just coords/coordsSource change, nothing else on the place.
+  const places = tripData.places.slice();
+  places[idx] = { ...places[idx], coords: { lat: parsed.lat, lng: parsed.lng }, coordsSource: 'user' };
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.places = places;
+  renderPlaces();
+}
+
 document.getElementById('places-list').addEventListener('click', e=>{
   if(e.target.classList.contains('place-thumb-empty')) return openPlaceModal(Number(e.target.dataset.idx));
   if(e.target.classList.contains('place-thumb')) return openPhotoLightbox(e.target.src);
   if(e.target.classList.contains('js-edit-place')) return openPlaceModal(Number(e.target.dataset.idx));
   if(e.target.classList.contains('js-check-place-coords')) return startCoordsFixer([tripData.places[Number(e.target.dataset.idx)]]);
   if(e.target.classList.contains('js-delete-place')) return deletePlace(Number(e.target.dataset.idx));
-  if(e.target.closest('a, button, textarea')) return; // don't hijack clicks on links/controls
+  if(e.target.classList.contains('js-paste-coords-toggle')){
+    const idx = e.target.dataset.idx;
+    const row = document.querySelector(`.paste-coords-row[data-idx="${idx}"]`);
+    row.classList.toggle('hidden');
+    if(!row.classList.contains('hidden')) row.querySelector('.js-paste-coords-input').focus();
+    return;
+  }
+  if(e.target.classList.contains('js-paste-coords-save')) return savePastedCoords(Number(e.target.dataset.idx));
+  if(e.target.classList.contains('js-paste-coords-cancel')) return closePasteCoordsRow(e.target.dataset.idx);
+  if(e.target.closest('a, button, textarea, input')) return; // don't hijack clicks on links/controls
   const row = e.target.closest('.place-row');
   if(row) focusMapOnPlace(Number(row.dataset.idx));
 });
@@ -2770,6 +2966,12 @@ document.getElementById('places-list').addEventListener('input', e=>{
   if(e.target.classList.contains('js-place-note')){
     const placeId = e.target.closest('.edit-row').dataset.placeid;
     db.collection('tripNotes').doc(currentTripId).set({places:{[placeId]:{note:e.target.value}}}, {merge:true});
+  }
+});
+document.getElementById('places-list').addEventListener('keydown', e=>{
+  if(e.target.classList.contains('js-paste-coords-input') && e.key === 'Enter'){
+    e.preventDefault();
+    savePastedCoords(Number(e.target.dataset.idx));
   }
 });
 
@@ -3145,6 +3347,15 @@ document.getElementById('btn-ai-generate').addEventListener('click', openAiModal
 document.getElementById('ai-modal').addEventListener('click', e=>{
   if(e.target.id === 'ai-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeAiModal();
 });
+// Back buttons — step back one screen instead of Cancel's "close the whole modal, lose progress".
+document.getElementById('ai-back-2').addEventListener('click', ()=>{
+  document.getElementById('ai-step-instructions').classList.add('hidden');
+  document.getElementById('ai-step-setup').classList.remove('hidden');
+});
+document.getElementById('ai-back-3').addEventListener('click', ()=>{
+  document.getElementById('ai-step-preview').classList.add('hidden');
+  document.getElementById('ai-step-instructions').classList.remove('hidden');
+});
 
 const AI_PLACE_SCHEMA_DOC = `Each item in the array must match this exact shape (use null for unknown optional fields; omit "coords" entirely unless you're actually confident — don't invent coordinates):
 {
@@ -3221,7 +3432,19 @@ function buildAiInstruction(){
 
 document.getElementById('ai-build').addEventListener('click', ()=>{
   document.getElementById('ai-instructions').value = buildAiInstruction();
+  document.getElementById('ai-step-setup').classList.add('hidden');
   document.getElementById('ai-step-instructions').classList.remove('hidden');
+});
+
+// Shortcut from the setup screen: builds the same instruction text (still shown on the
+// instructions screen, same as clicking "Generate instructions" — nothing about that step is
+// skipped, just not waited on) and immediately fires the Tier 3 call, rather than requiring a
+// second click on the instructions screen.
+document.getElementById('ai-build-and-direct-call').addEventListener('click', ()=>{
+  document.getElementById('ai-instructions').value = buildAiInstruction();
+  document.getElementById('ai-step-setup').classList.add('hidden');
+  document.getElementById('ai-step-instructions').classList.remove('hidden');
+  document.getElementById('ai-direct-call').click();
 });
 
 document.getElementById('ai-copy').addEventListener('click', async ()=>{
@@ -3234,6 +3457,49 @@ document.getElementById('ai-copy').addEventListener('click', async ()=>{
   }catch(err){
     alert('Could not copy automatically — select the text and copy manually.');
   }
+});
+
+// ---------- Tier 3: direct in-app AI call ----------
+// Calls the generateAiContent Cloud Function (functions/index.js) with the exact same instruction
+// text Tier 2's copy-paste flow already builds — this is Tier 2 with the manual "run it yourself
+// and paste the result back" step automated away, not a separate code path. The function itself
+// enforces auth + allowlist server-side (see its own comments); a caller who isn't signed in and
+// allowlisted gets a clear error back rather than the call silently no-opting.
+// statusEl/errEl let each caller (Places vs Routes generation) report into its own status/error
+// line; textareaId/validateBtnId are which paste-back textarea to fill and which Validate button to
+// trigger, so the result drops straight into the exact same preview pipeline a manual paste would.
+async function callAiDirect(prompt, { statusEl, errEl, textareaId, validateBtnId, button }){
+  button.disabled = true;
+  const origLabel = button.textContent;
+  button.textContent = 'Generating…';
+  statusEl.innerHTML = '<span class="spinner"></span>Generating with AI…';
+  errEl.textContent = '';
+  try{
+    const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt });
+    document.getElementById(textareaId).value = result.data.text;
+    statusEl.textContent = 'Generated — reviewing the response now.';
+    document.getElementById(validateBtnId).click();
+  }catch(err){
+    // err.code is one of Firebase's callable-function error codes (e.g. "unauthenticated",
+    // "permission-denied") when the function itself threw an HttpsError; a plain network/CORS
+    // failure surfaces as "internal"/"unavailable" with a less specific message. Either way, the
+    // paste-back textarea and manual Validate button are still right there as a fallback.
+    statusEl.textContent = ''; // clear the spinner — it would otherwise keep "spinning" after a failure
+    errEl.textContent = `Direct generation failed: ${err.message || err.code || 'unknown error'}. You can still paste a response from any AI below.`;
+  }finally{
+    button.disabled = false;
+    button.textContent = origLabel;
+  }
+}
+
+document.getElementById('ai-direct-call').addEventListener('click', ()=>{
+  callAiDirect(document.getElementById('ai-instructions').value, {
+    statusEl: document.getElementById('ai-direct-status'),
+    errEl: document.getElementById('ai-error'),
+    textareaId: 'ai-response',
+    validateBtnId: 'ai-validate',
+    button: document.getElementById('ai-direct-call')
+  });
 });
 
 // Shared by AI place-generation import and JSON Import/Export (see Overview tab) — one
@@ -3308,34 +3574,116 @@ function validateAiResponse(){
 }
 
 let aiPreviewPlaces = [];
+// Names already on the trip, lowercased — shared by renderAiPreview()'s "possible duplicate" badge
+// and the initial checked-state seed below, so the two can't disagree about what counts as a dup.
+function aiPreviewDuplicateNames(){
+  return new Set((tripData?.places||[]).map(p=>(p.name||'').trim().toLowerCase()));
+}
+// Tracks which rows are checked independent of the DOM — renderAiPreview() re-renders (rebuilding
+// every row's innerHTML from scratch) whenever the card review dialog closes, which would otherwise
+// silently reset every checkbox back to "checked unless duplicate," discarding any Reject/Approve
+// decisions made in the card view. Same bug class (and same fix) as routesPreviewChecked already
+// solved for the Routes checklist.
+let aiPreviewChecked = new Set();
 document.getElementById('ai-validate').addEventListener('click', ()=>{
   const places = validateAiResponse();
   if(!places) return;
   aiPreviewPlaces = places;
   aiPreviewMaybe = new Set();
+  const existingNames = aiPreviewDuplicateNames();
+  aiPreviewChecked = new Set(places.map((p,i)=>i).filter(i=>!existingNames.has((places[i].name||'').trim().toLowerCase())));
   renderAiPreview();
+  document.getElementById('ai-step-setup').classList.add('hidden');
+  document.getElementById('ai-step-instructions').classList.add('hidden');
   document.getElementById('ai-step-preview').classList.remove('hidden');
+  fetchAiPreviewPhotos(); // background — re-renders whichever view (checklist/card) is open as results land
 });
 
+// Same Wikipedia lookup the real Places tab uses (fetchPlacePhotoUrl(), see below) — run here too so
+// candidates show a real photo in both the checklist and card review before they're ever imported,
+// rather than only after. Mutates aiPreviewPlaces in place (draft objects, nothing written to
+// Firestore) with the same photoChecked/links{label:"Thumbnail"} shape a saved place gets, so once
+// actually imported the real fetchMissingPhotos() correctly skips re-fetching what's already found.
+let aiPreviewPhotosFetching = false;
+async function fetchAiPreviewPhotos(){
+  if(aiPreviewPhotosFetching) return;
+  const pending = aiPreviewPlaces.map((p,i)=>({p,i})).filter(({p})=>!p.photoChecked);
+  if(!pending.length) return;
+  aiPreviewPhotosFetching = true;
+  const results = await Promise.allSettled(pending.map(({p})=>fetchPlacePhotoUrl(p)));
+  pending.forEach(({i}, idx)=>{
+    const found = results[idx].status === 'fulfilled' ? results[idx].value : null;
+    const place = { ...aiPreviewPlaces[i], photoChecked: true };
+    if(found && !thumbnailLinkOf(place)) place.links = [...(place.links||[]), { label: 'Thumbnail', url: found }];
+    aiPreviewPlaces[i] = place;
+  });
+  aiPreviewPhotosFetching = false;
+  if(!document.getElementById('ai-step-preview').classList.contains('hidden')) renderAiPreview();
+  if(!document.getElementById('ai-card-review-modal').classList.contains('hidden')) renderAiCard();
+}
+
+// Revised from a <label>-wrapped row (which toggled the checkbox on any click, including the
+// links/expand button now nested inside it — the same label-click-forwarding conflict already
+// solved elsewhere in this app, e.g. the advanced route search's .rs-place-row) to a plain <div>
+// with its own click handler below that explicitly excludes links/buttons before toggling.
 function renderAiPreview(){
-  const existingNames = new Set((tripData?.places||[]).map(p=>(p.name||'').trim().toLowerCase()));
+  const existingNames = aiPreviewDuplicateNames();
   const el = document.getElementById('ai-preview-list');
   el.innerHTML = aiPreviewPlaces.map((p, i)=>{
     const isDup = existingNames.has((p.name||'').trim().toLowerCase());
     const isMaybe = aiPreviewMaybe.has(i);
+    const isChecked = aiPreviewChecked.has(i);
     const meta = [p.city, p.area, formatPriceBase(p.price)].filter(Boolean).join(' · ');
-    return `<label class="ai-preview-row">
-      <input type="checkbox" class="ai-preview-check" data-idx="${i}" ${isDup?'':'checked'}>
-      <div>
+    const thumbUrl = thumbnailLinkOf(p)?.url;
+    const thumb = thumbUrl ? `<img class="place-thumb js-ai-preview-thumb" data-idx="${i}" src="${thumbUrl}" alt="">`
+      : (p.photoChecked ? '<div class="place-thumb place-thumb-blank"></div>' : '<div class="place-thumb place-thumb-loading"></div>');
+    const officialLink = (p.links||[]).find(l=>!isThumbnailLabel(l.label));
+    return `<div class="ai-preview-row" data-idx="${i}">
+      <input type="checkbox" class="ai-preview-check" data-idx="${i}" ${isChecked?'checked':''}>
+      ${thumb}
+      <div style="flex:1; min-width:0;">
         <div class="place-name">${p.name}${isDup?' <span class="badge b-red">Possible duplicate</span>':''}${isMaybe?' <span class="badge">Maybe — rating halved</span>':''}</div>
         ${meta ? `<div class="place-meta">${meta}</div>` : ''}
+        <div style="margin-top:5px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>
+          ${officialLink ? `<a class="place-link" href="${officialLink.url}" target="_blank">${officialLink.label} ↗</a>` : ''}
+        </div>
       </div>
-    </label>`;
+      <button type="button" class="btn-small js-ai-preview-expand" data-idx="${i}" style="flex-shrink:0; align-self:center;">🖼 View card</button>
+    </div>`;
   }).join('');
 }
+// Single source of truth for a row's checked state — keeps aiPreviewChecked and the actual DOM
+// checkbox (when the checklist is currently rendered) in sync regardless of which one triggered the
+// change, same pattern as this app's setRouteSearchCheck().
+function setAiPreviewChecked(idx, checked){
+  if(checked) aiPreviewChecked.add(idx); else aiPreviewChecked.delete(idx);
+  const cb = document.querySelector(`.ai-preview-check[data-idx="${idx}"]`);
+  if(cb) cb.checked = checked;
+}
+document.getElementById('ai-preview-list').addEventListener('click', e=>{
+  if(e.target.classList.contains('js-ai-preview-thumb')){ e.preventDefault(); openPhotoLightbox(e.target.src); return; }
+  const expandBtn = e.target.closest('.js-ai-preview-expand');
+  if(expandBtn){ openAiCardReview(Number(expandBtn.dataset.idx)); return; }
+  if(e.target.closest('a, button, input')) return; // let links/checkbox/expand handle their own clicks
+  const row = e.target.closest('.ai-preview-row');
+  if(!row) return;
+  const idx = Number(row.dataset.idx);
+  setAiPreviewChecked(idx, !aiPreviewChecked.has(idx));
+});
+// A direct click on the checkbox itself is excluded from the row handler above (native toggle
+// already happened) — sync that back into aiPreviewChecked via the resulting change event instead.
+document.getElementById('ai-preview-list').addEventListener('change', e=>{
+  if(!e.target.classList.contains('ai-preview-check')) return;
+  if(e.target.checked) aiPreviewChecked.add(Number(e.target.dataset.idx));
+  else aiPreviewChecked.delete(Number(e.target.dataset.idx));
+});
 
 document.getElementById('ai-import').addEventListener('click', async ()=>{
-  const checked = Array.from(document.querySelectorAll('.ai-preview-check:checked')).map(cb=>Number(cb.dataset.idx));
+  // Reads aiPreviewChecked directly rather than the DOM's :checked state — the two are always kept
+  // in sync via setAiPreviewChecked()/the change listener, and the Set is the actual source of
+  // truth (survives the checklist being torn down and rebuilt by renderAiPreview()).
+  const checked = Array.from(aiPreviewChecked);
   if(!checked.length){ closeAiModal(); return; }
   const toAdd = checked.map(i=>{
     const p = aiPreviewPlaces[i];
@@ -3373,7 +3721,9 @@ function aiCardDecisionOf(idx){
 function aiCardDetailHtml(p){
   const thumbUrl = thumbnailLinkOf(p)?.url;
   const catTags = (p.cat||[]).map(c=>`<span class="tag">${formatCat(c)}</span>`).join('');
-  const links = (p.links||[]).filter(l=>!isThumbnailLabel(l.label)).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
+  const mapHref = mapLink((p.name||'')+' '+(p.city||''));
+  const links = `<a class="place-link" href="${mapHref}" target="_blank">Map ↗</a>` +
+    (p.links||[]).filter(l=>!isThumbnailLabel(l.label)).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('');
   const priceBase = formatPriceBase(p.price);
   const priceLine = (priceBase || p.price?.note) ? `<div class="place-meta">Price: ${priceBase||'–'}${noteChipHtml(p.price?.note)}</div>` : '';
   const hoursBase = formatHours(p.hours);
@@ -3408,12 +3758,15 @@ function renderAiCard(){
   });
 }
 
-document.getElementById('ai-open-card-review').addEventListener('click', ()=>{
+// Shared by the top "Review as cards" button (starts at 0) and each row's "🖼 View card" button
+// (starts at that specific place) — both just want "open the card dialog at index N."
+function openAiCardReview(startIdx){
   if(!aiPreviewPlaces.length) return;
-  aiCardCursor = 0;
+  aiCardCursor = startIdx || 0;
   renderAiCard();
   document.getElementById('ai-card-review-modal').classList.remove('hidden');
-});
+}
+document.getElementById('ai-open-card-review').addEventListener('click', ()=>openAiCardReview(0));
 document.getElementById('ai-card-done').addEventListener('click', ()=>{
   document.getElementById('ai-card-review-modal').classList.add('hidden');
   renderAiPreview(); // reflect any maybe/reject/approve badges picked up in the card view
@@ -3429,11 +3782,18 @@ document.getElementById('ai-card-prev').addEventListener('click', ()=>{
 });
 function decideAiCard(decision){
   const idx = aiCardCursor;
-  const cb = document.querySelector(`.ai-preview-check[data-idx="${idx}"]`);
-  if(cb) cb.checked = decision !== 'reject';
+  setAiPreviewChecked(idx, decision !== 'reject');
   if(decision === 'maybe') aiPreviewMaybe.add(idx); else aiPreviewMaybe.delete(idx);
-  if(aiCardCursor < aiPreviewPlaces.length-1){ aiCardCursor++; renderAiCard(); }
-  else renderAiCard(); // stay on the last card, just refresh its active-decision highlight
+  if(aiCardCursor < aiPreviewPlaces.length-1){
+    aiCardCursor++;
+    renderAiCard();
+  }else{
+    // Last card decided — nothing left to review, so close and return to the checklist
+    // automatically instead of leaving the user stranded on the last card needing an explicit
+    // "Done — back to list" click.
+    document.getElementById('ai-card-review-modal').classList.add('hidden');
+    renderAiPreview();
+  }
 }
 document.getElementById('ai-card-reject').addEventListener('click', ()=>decideAiCard('reject'));
 document.getElementById('ai-card-maybe').addEventListener('click', ()=>decideAiCard('maybe'));
@@ -3497,6 +3857,7 @@ function setRoutesGenMethod(method){
   document.getElementById('routes-field-travel-methods').style.display = method === 'algo' ? 'none' : '';
   document.getElementById('routes-field-notes').style.display = method === 'algo' ? 'none' : '';
   document.getElementById('routes-build').textContent = method === 'algo' ? 'Generate routes' : 'Generate instructions';
+  document.getElementById('routes-build-and-direct-call').style.display = method === 'algo' ? 'none' : '';
 }
 document.getElementById('routes-gen-method').addEventListener('click', e=>{
   const btn = e.target.closest('.cat-chip');
@@ -3538,6 +3899,18 @@ document.getElementById('btn-generate-routes').addEventListener('click', openRou
 ['routes-cancel-1','routes-cancel-2','routes-cancel-3'].forEach(id=>document.getElementById(id).addEventListener('click', closeRoutesModal));
 document.getElementById('routes-modal').addEventListener('click', e=>{
   if(e.target.id === 'routes-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeRoutesModal();
+});
+// Back buttons — step back one screen instead of Cancel's "close the whole modal, lose progress".
+document.getElementById('routes-back-2').addEventListener('click', ()=>{
+  document.getElementById('routes-step-instructions').classList.add('hidden');
+  document.getElementById('routes-step-setup').classList.remove('hidden');
+});
+document.getElementById('routes-back-3').addEventListener('click', ()=>{
+  document.getElementById('routes-step-preview').classList.add('hidden');
+  // Algorithm mode skips the instructions step entirely (setup -> preview directly), so Back from
+  // preview has to know which path got here rather than always assuming "instructions".
+  if(routesGenMethod === 'algo') document.getElementById('routes-step-setup').classList.remove('hidden');
+  else document.getElementById('routes-step-instructions').classList.remove('hidden');
 });
 
 function buildRoutesInstruction(){
@@ -3761,11 +4134,23 @@ document.getElementById('routes-build').addEventListener('click', ()=>{
     routesPreviewList = result.routes;
     routesPreviewChecked = new Set(result.routes.map((_, i)=>i));
     renderRoutesPreview();
+    document.getElementById('routes-step-setup').classList.add('hidden');
     document.getElementById('routes-step-preview').classList.remove('hidden');
     return;
   }
   document.getElementById('routes-instructions').value = buildRoutesInstruction();
+  document.getElementById('routes-step-setup').classList.add('hidden');
   document.getElementById('routes-step-instructions').classList.remove('hidden');
+});
+
+// Same shortcut as ai-build-and-direct-call above, for the AI (paste-back) route generation path
+// only — the Algorithm path has no instructions/direct-call step at all, so this button is hidden
+// whenever routesGenMethod is 'algo' (see setRoutesGenMethod()).
+document.getElementById('routes-build-and-direct-call').addEventListener('click', ()=>{
+  document.getElementById('routes-instructions').value = buildRoutesInstruction();
+  document.getElementById('routes-step-setup').classList.add('hidden');
+  document.getElementById('routes-step-instructions').classList.remove('hidden');
+  document.getElementById('routes-direct-call').click();
 });
 
 document.getElementById('routes-copy').addEventListener('click', async ()=>{
@@ -3778,6 +4163,16 @@ document.getElementById('routes-copy').addEventListener('click', async ()=>{
   }catch(err){
     alert('Could not copy automatically — select the text and copy manually.');
   }
+});
+
+document.getElementById('routes-direct-call').addEventListener('click', ()=>{
+  callAiDirect(document.getElementById('routes-instructions').value, {
+    statusEl: document.getElementById('routes-direct-status'),
+    errEl: document.getElementById('routes-error'),
+    textareaId: 'routes-response',
+    validateBtnId: 'routes-validate',
+    button: document.getElementById('routes-direct-call')
+  });
 });
 
 function validateRoutesResponse(){
@@ -3886,6 +4281,8 @@ document.getElementById('routes-validate').addEventListener('click', ()=>{
   routesPreviewList = routes;
   routesPreviewChecked = new Set(routes.map((_, i)=>i)); // all checked by default
   renderRoutesPreview();
+  document.getElementById('routes-step-setup').classList.add('hidden');
+  document.getElementById('routes-step-instructions').classList.add('hidden');
   document.getElementById('routes-step-preview').classList.remove('hidden');
 });
 
@@ -5371,6 +5768,209 @@ document.getElementById('ar-add').addEventListener('click', async ()=>{
   closeAddRoutesModal();
 });
 
+// ---------- Nearby places (Day-by-day) ----------
+// For a spontaneous "what's close by right now" moment, not necessarily tied to today's planned
+// route. Reuses tripData.routes as-is: adding a result creates a plain ROUTE with a single stop
+// and assigns it to the currently selected day, exactly like any multi-stop route — no new data
+// structure needed. A 1-stop route has zero interstops (gap count = stops.length-1 = 0), day
+// assignment is the same assignedRoutes array every route uses, and rating/review already works
+// generically via tripNotes.routeStops["<routeId>:0"] since nothing in Day-by-day's rendering
+// assumes more than one stop.
+let npMap = null;
+let npMarkersByPlaceId = {};
+let npReferencePoint = null; // {lat, lng, source: 'gps'|'map'|'base'}
+let npRadiusKm = 1;
+let npCatFilter = new Set(); // empty = all categories
+
+function npCategoriesAvailable(){
+  return [...new Set((tripData?.places||[]).flatMap(p=>p.cat||[]))].filter(c=>c!=='base').sort();
+}
+function renderNpCatFilter(){
+  const el = document.getElementById('np-cat-filter');
+  const cats = npCategoriesAvailable();
+  el.innerHTML = cats.map(c=>`<button type="button" class="cat-chip ${npCatFilter.has(c)?'active':''}" data-cat="${c}">${formatCat(c)}</button>`).join('');
+}
+document.getElementById('np-cat-filter').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  const c = btn.dataset.cat;
+  if(npCatFilter.has(c)) npCatFilter.delete(c); else npCatFilter.add(c);
+  renderNpCatFilter();
+  renderNpList();
+});
+
+function updateNpLocationStatus(extra){
+  const el = document.getElementById('np-location-status');
+  if(!npReferencePoint){ el.textContent = 'No location set — click "Use my location" or click a point on the map.'; return; }
+  const label = npReferencePoint.source === 'gps' ? 'your current location'
+    : npReferencePoint.source === 'base' ? 'your base of operations'
+    : 'the point you clicked on the map';
+  el.textContent = `Searching near ${label} (${npReferencePoint.lat.toFixed(4)}, ${npReferencePoint.lng.toFixed(4)}).${extra ? ' '+extra : ''}`;
+}
+
+function npTryGeolocate(){
+  const el = document.getElementById('np-location-status');
+  if(!navigator.geolocation){
+    el.textContent = 'Geolocation not available in this browser — click a point on the map instead.';
+    return;
+  }
+  el.textContent = 'Getting your location…';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      npReferencePoint = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
+      updateNpLocationStatus();
+      renderNpList();
+    },
+    () => {
+      const base = findBasePlace();
+      if(base?.coords){
+        npReferencePoint = { lat: base.coords.lat, lng: base.coords.lng, source: 'base' };
+        updateNpLocationStatus("Couldn't get your location, so using your base of operations instead — click the map to change it.");
+      }else{
+        el.textContent = "Couldn't get your location — click a point on the map to search from there instead.";
+      }
+      renderNpList();
+    },
+    { timeout: 8000 }
+  );
+}
+document.getElementById('np-use-my-location').addEventListener('click', npTryGeolocate);
+
+function npNearbyResults(){
+  if(!npReferencePoint) return [];
+  const radiusM = npRadiusKm * 1000;
+  const withDist = (tripData?.places||[])
+    .filter(p => p.coords && !(p.cat||[]).includes('base'))
+    .map(p => ({ p, dist: haversineMeters(npReferencePoint.lat, npReferencePoint.lng, p.coords.lat, p.coords.lng) }))
+    .filter(({dist}) => dist <= radiusM);
+  const filtered = npCatFilter.size
+    ? withDist.filter(({p}) => (p.cat||[]).some(c=>npCatFilter.has(c)))
+    : withDist;
+  return filtered.sort((a,b)=>a.dist-b.dist);
+}
+
+function renderNpList(){
+  const el = document.getElementById('np-list');
+  const results = npNearbyResults();
+  if(!npReferencePoint){
+    el.innerHTML = '<p class="mono">Set a location above to see nearby places.</p>';
+  }else if(!results.length){
+    el.innerHTML = '<p class="mono">No saved places match within this radius/category.</p>';
+  }else{
+    el.innerHTML = results.map(({p,dist})=>`<div class="card" style="margin-bottom:10px;">
+      ${placeDetailHtml(p)}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+        <span class="place-meta">${formatLegDistance(Math.round(dist))} away</span>
+        <button type="button" class="btn-small js-np-add" data-place-id="${p.id}">+ Add to today</button>
+      </div>
+    </div>`).join('');
+  }
+  updateDayPriceConversions(results.map(r=>r.p));
+  renderNpMap(results);
+}
+
+function renderNpMap(results){
+  const container = document.getElementById('np-map');
+  if(!container) return;
+  if(!npMap){
+    npMap = L.map(container).setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(npMap);
+    npMap.on('click', e=>{
+      npReferencePoint = { lat: e.latlng.lat, lng: e.latlng.lng, source: 'map' };
+      updateNpLocationStatus();
+      renderNpList();
+    });
+  }
+  // L.Circle extends L.CircleMarker in Leaflet, so this one check clears both the reference
+  // marker/radius circle and every result marker before redrawing.
+  npMap.eachLayer(layer => { if(layer instanceof L.CircleMarker) npMap.removeLayer(layer); });
+  npMarkersByPlaceId = {};
+  const points = [];
+  if(npReferencePoint){
+    L.circleMarker([npReferencePoint.lat, npReferencePoint.lng], {
+      radius: 9, weight: 2, color: '#fff', fillColor: '#C0913A', fillOpacity: 1 // --mustard
+    }).addTo(npMap).bindTooltip('Your search location');
+    L.circle([npReferencePoint.lat, npReferencePoint.lng], {
+      radius: npRadiusKm * 1000, color: '#2C6E82', fillColor: '#2C6E82', fillOpacity: 0.08, weight: 1 // --harbor
+    }).addTo(npMap);
+    points.push([npReferencePoint.lat, npReferencePoint.lng]);
+  }
+  results.forEach(({p})=>{
+    const marker = L.circleMarker([p.coords.lat, p.coords.lng], {
+      radius: 7, weight: 2, color: '#fff', fillColor: '#5E7A57', fillOpacity: 0.9 // --moss
+    }).addTo(npMap);
+    marker.bindTooltip(p.name);
+    npMarkersByPlaceId[p.id] = marker;
+    points.push([p.coords.lat, p.coords.lng]);
+  });
+  setTimeout(()=>{
+    if(document.getElementById('nearby-places-modal').classList.contains('hidden')) return;
+    npMap.invalidateSize();
+    if(npReferencePoint) npMap.setView([npReferencePoint.lat, npReferencePoint.lng], 14);
+    else if(points.length) npMap.fitBounds(points, { padding:[30,30] });
+    else npMap.setView([20,0], 2);
+  }, 50);
+}
+
+function openNearbyPlacesModal(){
+  if(!daysSelectedDate) return;
+  npReferencePoint = null;
+  npRadiusKm = 1;
+  npCatFilter = new Set();
+  document.getElementById('np-radius').value = 1;
+  document.getElementById('nearby-places-modal').classList.remove('hidden');
+  renderNpCatFilter();
+  updateNpLocationStatus();
+  renderNpList();
+  npTryGeolocate(); // best-effort on open; falls back to base of operations, then a map click
+}
+function closeNearbyPlacesModal(){ document.getElementById('nearby-places-modal').classList.add('hidden'); }
+document.getElementById('btn-days-nearby-places').addEventListener('click', openNearbyPlacesModal);
+document.getElementById('np-close').addEventListener('click', closeNearbyPlacesModal);
+document.getElementById('nearby-places-modal').addEventListener('click', e=>{
+  if(e.target.id === 'nearby-places-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeNearbyPlacesModal();
+});
+document.getElementById('np-radius').addEventListener('input', e=>{
+  npRadiusKm = Number(e.target.value) || 1;
+  renderNpList();
+});
+
+// Deliberately does NOT close the dialog on add — a spontaneous "what's around me" search often
+// wants more than one result added in the same sitting, so each row gets its own inline "✓ Added"
+// feedback instead.
+document.getElementById('np-list').addEventListener('click', async e=>{
+  if(e.target.classList.contains('js-route-thumb')){ e.preventDefault(); openPhotoLightbox(e.target.src); return; }
+  const btn = e.target.closest('.js-np-add');
+  if(!btn) return;
+  const place = (tripData.places||[]).find(p=>p.id===btn.dataset.placeId);
+  if(!place) return;
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  const route = {
+    id: 'route-nearby-' + slugify(place.name) + '-' + Date.now().toString(36),
+    city: place.city || '',
+    label: place.name,
+    stops: [{ type:'place', placeId: place.id, note:'', stayDuration: null }],
+    interstops: [],
+    totalWantRating: place.wantRating || 0,
+    generatedBy: 'manual',
+    edited: false
+  };
+  const routes = (tripData.routes||[]).concat([route]);
+  const days = (tripData.days||[]).map(d => d.date === daysSelectedDate
+    ? { ...d, assignedRoutes: [...(d.assignedRoutes||[]), route.id] }
+    : d);
+  await db.collection('tripData').doc(currentTripId).update({ routes, days });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.routes = routes;
+  tripData.days = days;
+  btn.textContent = '✓ Added';
+  renderDaysLevel2And3();
+});
+
 // Full Places-tab-level detail for one place — thumbnail, name/rating/badges, meta line
 // (city/area/price/hours), category tags, note, wishlist, links — factored out of renderPlaces()
 // so Day-by-day Level 2/3 can show the same richness instead of just a name. Route-specific fields
@@ -6680,7 +7280,7 @@ async function startCoordsFixer(explicitPlaces){
     if(coordsWaitingForNext) showNextCoordsReviewItem();
   })();
 }
-document.getElementById('btn-check-coords').addEventListener('click', startCoordsFixer);
+document.getElementById('btn-check-coords').addEventListener('click', ()=>startCoordsFixer());
 </script>
 </body>
 </html>
