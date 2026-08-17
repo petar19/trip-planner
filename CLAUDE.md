@@ -294,7 +294,15 @@ tripData/{tripId}                  — trip content, fetched once per open, over
       // shrinking date range just drops out of assignedRoutes with the day; the route itself is
       // untouched, no separate cleanup needed anywhere else.
     ],
-    events: [ { name, certainty, desc } ],
+    events: [ { name, certainty, desc } ],  // Events tab (nav) is still a stub ("Not built yet.") —
+                               // this field exists in the schema but nothing reads/writes it yet.
+                               // Planned direction: finding real-world local events (concerts,
+                               // markets, festivals) during the trip's dates and converting them
+                               // into places with a specific date/time and category — needs either
+                               // a real external events API (Ticketmaster/Eventbrite-type) or,
+                               // now that Tier 3 direct AI calls exist, giving the AI web-search/
+                               // tool-use capability instead of hand-rolling a free events API
+                               // integration. Not scoped beyond that yet.
     expenses: [   // Phase (post-Phase-7 roadmap) — freestanding manual costs not tied to a
                   // specific stop visit. Renamed from the original schema's always-empty
                   // `budget: []` stub, which nothing ever read or wrote — see "Budget tab" below
@@ -756,26 +764,33 @@ or mixes across sections of the same trip:
    (as a signed-in, allowlisted user, through the actual UI) still needs manual testing in the
    browser — that part needs a real Firebase Auth session, which can't be done from the CLI.
 
-⬜ **Idea, blocked on Tier 3 — "Ask AI about this place"**: a per-place action, visible both in the
-Places tab and in Day-by-day's single-stop execution view (Level 3, the review screen), that lets
-the user ask the AI to say more about the place or fact-check the data already saved for it (hours,
-price, whether it's still open, etc.) — a live, on-demand call, so it needs Tier 3's Cloud Function
-proxy to exist first; doesn't fit the paste-back model. Not designed beyond the concept yet — open
-questions: what UI (a modal? an inline expand?), what gets sent to the AI (just the place's saved
-fields, or also live web search/grounding — a real fact-check needs the latter, since the AI's own
-training data can't confirm current hours), and how a response should be surfaced (freeform text?
-specific flagged discrepancies against the saved fields?).
+**Revised now that Tier 3 is live** (see below — `generateAiContent` is deployed and callable): the
+original "Ask AI about this place" idea was one vague per-place action covering two different jobs;
+it's since been split into two concrete, independently-scoped backlog items, neither blocked on
+infrastructure anymore, just on their own design/implementation:
 
-⬜ **Idea, blocked on Tier 3 — "What's nearby?"**: an ad-hoc query for when the user wants to do
-something off-route or spontaneous, reachable from Day-by-day (and possibly Places) — free text like
-"I want to eat burgers or pizza nearby" or "I want to see X", answered by combining two sources: (1)
-the trip's own saved places within a configurable radius (default e.g. 1km, adjustable) of wherever
-the user currently is in the plan, and (2) live AI-suggested general options nearby, not limited to
-what's already saved (same web-search/grounding question as "Ask AI about this place" above). Results
-get an "add to route" and/or "add to places" action. Not designed beyond the concept — open
-questions: exact UI entry point, how "current location" is derived when the user isn't mid-route,
-and how a chosen result gets reconciled into `places[]`/a route's `stops[]` (a new place entry?
-inserted directly as a stop?).
+⬜ **"AI Verify" on the place edit modal** — sends the place's full current data (name, city, area,
+cat, price, hours, note, wishlist, links, coords, etc.) to the AI asking it to fact-check and
+suggest corrections, then shows current-vs-AI-recommended side by side with differences highlighted,
+letting the user accept changes individually rather than all-or-nothing — likely reusing patterns
+from the AI place-import card review (colored per-item accept/reject). Open question carried over
+from the original idea: a real fact-check needs live web search/grounding, since the model's own
+training data can't confirm current hours/prices — whether/how to give the Cloud Function that
+capability isn't decided yet.
+
+⬜ **"Tell me more" on Day-by-day's single-stop view (Level 3)** — a free-text "interesting facts
+about this place" call, result saved either to a new dedicated field or appended to an existing note
+— which one is still an open question (candidates: `places[].note`, the route-stop's own planning
+note, or a new field entirely so AI-sourced facts don't get mixed in with what the user wrote
+themselves).
+
+✅ **"What's nearby?" — the non-AI half is done, see "Day-by-day tab" below** (the "🔍 Nearby
+places" dialog: radius + category filter over the trip's own saved places, browser geolocation).
+What's still just an idea, not built: extending that dialog with live AI-suggested *general*
+options beyond what's already saved (e.g. "I want pizza" pulling in real nearby restaurants the
+trip hasn't saved yet) — same web-search/grounding open question as "AI Verify" above, and would
+need deciding how a chosen AI-suggested result gets turned into a real `places[]` entry before it
+could be added to a route.
 
 All three tiers feed the same validation → preview → edit pipeline. The full new-trip Draft flow
 below (staging in `localStorage` before an explicit "Save trip") isn't built yet; the places-only
