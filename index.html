@@ -13,6 +13,7 @@
     --paper:#F6F3EC; --paper-raised:#FFFFFF; --ink:#1C2B39; --ink-soft:#4B5B68; --line:#DDD6C7;
     --red:#C1362B; --harbor:#2C6E82; --harbor-soft:#E4EEF0; --mustard:#C0913A; --mustard-soft:#F4EBD9;
     --moss:#5E7A57; --moss-soft:#E9EFE4; --gold:#B8933C;
+    --plum:#7D5A73; --rose:#B5677A;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--paper); color:var(--ink); font-family:'Inter',sans-serif; font-size:15.5px; line-height:1.55;}
@@ -153,7 +154,8 @@
   #days-day-select{padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; background:#fff;}
 
   /* Places */
-  .place-row{padding:14px 0; border-bottom:1px solid var(--line);} .place-row:last-child{border-bottom:none;}
+  .place-row{padding:14px 0 14px 12px; border-bottom:1px solid var(--line); border-left:4px solid var(--line);} .place-row:last-child{border-bottom:none;}
+  .event-date-badge{background:var(--plum); color:#fff;}
   .place-name{font-weight:600; font-size:1.02rem;}
   .place-meta{color:var(--ink-soft); font-size:.85rem; margin-top:2px;}
   .want-rating{font-family:'JetBrains Mono',monospace; font-size:.78rem; font-weight:600; color:var(--gold);}
@@ -334,7 +336,6 @@
     <button data-tab="overview" class="active">Overview</button>
     <button data-tab="places">Places</button>
     <button data-tab="routes">Routes</button>
-    <button data-tab="events">Events</button>
     <button data-tab="days">Day-by-day</button>
     <button data-tab="budget">Budget</button>
     <button data-tab="documents">Documents</button>
@@ -362,6 +363,7 @@
       <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
         <button class="primary" id="btn-add-place">+ Add place</button>
         <button id="btn-ai-generate" class="btn-small">✨ Generate with AI</button>
+        <button id="btn-events-generate" class="btn-small">📅 Generate events with AI</button>
         <button id="btn-check-coords" class="btn-small">📍 Check coordinates<span id="coords-pending-count"></span></button>
       </div>
 
@@ -379,6 +381,7 @@
               <option value="name">Name (A–Z)</option>
               <option value="price">Price (low to high)</option>
               <option value="added">Recently added</option>
+              <option value="eventDate">Event date (soonest first)</option>
             </select>
           </div>
           <div id="cat-filter" class="cat-picker" style="margin-bottom:10px;"></div>
@@ -406,7 +409,6 @@
       <div id="routes-list"></div>
     </section>
 
-    <section class="panel" id="p-events"><p class="mono">Not built yet.</p></section>
     <section class="panel" id="p-days">
       <div style="margin-bottom:16px;">
         <label for="days-day-select">Day</label>
@@ -824,6 +826,80 @@
       <button type="button" class="btn-small ai-card-decision" id="ai-card-reject">✕ Reject</button>
       <button type="button" class="btn-small ai-card-decision" id="ai-card-maybe">? Maybe</button>
       <button type="button" class="btn-small ai-card-decision" id="ai-card-approve">✓ Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ AI EVENT GENERATION ============ -->
+<!-- Events aren't a separate concept in the data model — an event is just a places[] entry with
+     an eventDate set and cat including "event" (see CLAUDE.md). This modal mirrors #ai-modal's
+     setup/instructions/preview structure but with event-specific setup fields (a date range instead
+     of the general preferences form) and no card-review step — a big photo card is less useful for
+     "what's happening on this date" than it is for "should I visit this place." -->
+<div id="events-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:700px;">
+    <h3>Generate events with AI</h3>
+
+    <div id="events-step-setup">
+      <div id="events-no-cities-hint" class="hidden" style="background:var(--mustard-soft); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.85rem;">
+        This trip has no cities set yet. <button type="button" class="btn-small" id="events-open-edit-trip" style="padding:3px 10px;">Edit trip details</button>
+      </div>
+      <div class="modal-grid">
+        <div>
+          <label for="events-city">City</label>
+          <select id="events-city"></select>
+        </div>
+        <div>
+          <label for="events-count">Roughly how many events</label>
+          <input id="events-count" type="number" min="1" max="20" value="6">
+        </div>
+        <div>
+          <label for="events-date-from">From date</label>
+          <input id="events-date-from" type="date">
+        </div>
+        <div>
+          <label for="events-date-to">To date</label>
+          <input id="events-date-to" type="date">
+        </div>
+        <div class="span-2">
+          <label for="events-notes">Anything specific (optional)</label>
+          <textarea id="events-notes" placeholder="e.g. mostly free/outdoor events, interested in live music"></textarea>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:4px;">The AI may not have fully up-to-date event listings — always verify dates/times before relying on them.</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="events-cancel-1">Cancel</button>
+        <button class="btn-small" id="events-build-and-direct-call">✨ Generate with AI directly</button>
+        <button class="btn-save" id="events-build">Generate instructions</button>
+      </div>
+    </div>
+
+    <div id="events-step-instructions" class="hidden">
+      <label for="events-instructions">Instructions — copy this to your AI of choice</label>
+      <textarea id="events-instructions" readonly style="min-height:180px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn-small" id="events-copy">Copy to clipboard</button>
+        <button type="button" class="btn-small" id="events-direct-call">✨ Generate via AI directly</button>
+        <span id="events-direct-status" class="place-meta"></span>
+      </div>
+      <label for="events-response" style="margin-top:20px;">Paste the AI's JSON response here (or use "Generate via AI directly" above to skip this)</label>
+      <textarea id="events-response" placeholder="[ { &quot;name&quot;: ... }, ... ]" style="min-height:140px; font-family:'JetBrains Mono',monospace; font-size:.78rem;"></textarea>
+      <div id="events-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
+      <div class="modal-actions">
+        <button class="btn-small" id="events-back-2">← Back</button>
+        <button class="btn-cancel" id="events-cancel-2">Cancel</button>
+        <button class="btn-save" id="events-validate">Validate &amp; preview</button>
+      </div>
+    </div>
+
+    <div id="events-step-preview" class="hidden">
+      <p class="hint" style="margin-bottom:10px;">Review before importing — likely duplicates are unchecked by default.</p>
+      <div id="events-preview-list"></div>
+      <div class="modal-actions">
+        <button class="btn-small" id="events-back-3">← Back</button>
+        <button class="btn-cancel" id="events-cancel-3">Cancel</button>
+        <button class="btn-save" id="events-import">Import selected</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2799,6 +2875,17 @@ function sortPlacesList(withIdx){
       return pa - pb;
     });
   }
+  if(placesSortBy === 'eventDate'){
+    // Places with no eventDate at all (the overwhelming majority — this option mainly matters once
+    // a trip actually has some events) sort to the end, same "unknown sorts last" convention price
+    // sorting already uses.
+    return arr.sort((a,b)=>{
+      if(!a.p.eventDate && !b.p.eventDate) return 0;
+      if(!a.p.eventDate) return 1;
+      if(!b.p.eventDate) return -1;
+      return a.p.eventDate < b.p.eventDate ? -1 : a.p.eventDate > b.p.eventDate ? 1 : 0;
+    });
+  }
   return arr.sort((a,b)=>(b.p.wantRating||0)-(a.p.wantRating||0)); // 'want' (default)
 }
 document.getElementById('places-sort').addEventListener('change', e=>{
@@ -2812,6 +2899,27 @@ function sourceIcons(source){
   if(source.ai) icons.push('<span class="source-icon" title="AI-generated">✨</span>');
   if(source.user) icons.push('<span class="source-icon" title="Added/edited by you">✎</span>');
   return icons.join('');
+}
+
+// Left-edge accent border on each Places-tab row, grouping the free-form cat[] tags into six
+// broad visual buckets at a glance — event first (a date-bound event is the most specific/salient
+// thing to flag, and always tagged "event" regardless of what else a candidate carries), then the
+// rest in no particular priority order since a place rarely spans more than one of them. Anything
+// that doesn't match a keyword (including "nightlife," which the user's six groups didn't cover)
+// falls into the neutral "other" bucket rather than being force-fit somewhere.
+const CATEGORY_GROUPS = [
+  { color: 'var(--plum)',    keywords: ['event'] },
+  { color: 'var(--mustard)', keywords: ['food','restaurant','cafe','café'] },
+  { color: 'var(--harbor)',  keywords: ['museum','castle','church','landmark','palace','monument','temple','cathedral'] },
+  { color: 'var(--moss)',    keywords: ['park/nature','park','zoo','aquarium','garden','nature'] },
+  { color: 'var(--rose)',    keywords: ['shopping','market'] }
+];
+function categoryGroupColor(cat){
+  const tags = (cat||[]).map(c=>c.toLowerCase());
+  for(const group of CATEGORY_GROUPS){
+    if(group.keywords.some(k=>tags.some(t=>t.includes(k)))) return group.color;
+  }
+  return 'var(--ink-soft)'; // "other" — doesn't fit any named group
 }
 
 function renderPlaces(){
@@ -2863,11 +2971,12 @@ function renderPlaces(){
     const thumb = thumbUrl ? `<img class="place-thumb" src="${thumbUrl}" alt="">`
       : (p.photoChecked ? `<div class="place-thumb place-thumb-empty" data-idx="${i}" title="Add a photo">+</div>` : '<div class="place-thumb place-thumb-loading"></div>');
 
-    return `<div class="place-row" data-idx="${i}">
+    const eventBadge = p.eventDate ? `<span class="badge event-date-badge">📅 ${formatEventDate(p.eventDate)}</span> ` : '';
+    return `<div class="place-row" data-idx="${i}" style="border-left-color:${categoryGroupColor(p.cat)};">
       <div style="display:flex; gap:12px;">
         ${thumb}
         <div style="flex:1; min-width:0;">
-          <div class="place-name">${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)} ${sourceIcons(p.source)}</div>
+          <div class="place-name">${eventBadge}${p.name} <span class="${wantClass}">${p.wantRating||'–'}/10</span> ${certBadge(p.certainty)} ${sourceIcons(p.source)}</div>
           <div class="place-meta">${[p.city, p.area, priceDisplay, hoursDisplay].filter(Boolean).join(' · ')}</div>
           ${catTags ? `<div style="margin-top:6px;">${catTags}</div>` : ''}
           ${p.note ? `<div class="place-general-note">${p.note}</div>` : ''}
@@ -3543,6 +3652,17 @@ function sanitizePlaceItem(item, errors, i, opts){
     place.coords = { lat: item.coords.lat, lng: item.coords.lng };
     place.coordsSource = ['osm','user','ai'].includes(item.coordsSource) ? item.coordsSource : 'ai';
   }
+  // eventDate marks a place as a one-time dated event rather than an always-visitable destination
+  // (see CLAUDE.md "Firestore schema" — events aren't a separate array, just a place with this set
+  // plus cat including "event"). Carried through generically whenever present and valid — harmless
+  // on an ordinary place (e.g. re-importing a previous export) — but required when
+  // opts.requireEventDate is set, the one thing the events-generation path can't proceed without.
+  const eventDateValid = typeof item.eventDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.eventDate) && !isNaN(Date.parse(item.eventDate));
+  if(opts.requireEventDate && !eventDateValid){
+    errors.push(`Item ${i+1} ("${name}"): missing or invalid "eventDate" (expected "YYYY-MM-DD").`);
+    return null;
+  }
+  if(eventDateValid) place.eventDate = item.eventDate;
   return place;
 }
 
@@ -3798,6 +3918,219 @@ function decideAiCard(decision){
 document.getElementById('ai-card-reject').addEventListener('click', ()=>decideAiCard('reject'));
 document.getElementById('ai-card-maybe').addEventListener('click', ()=>decideAiCard('maybe'));
 document.getElementById('ai-card-approve').addEventListener('click', ()=>decideAiCard('approve'));
+
+// ---------- AI event generation (mirrors AI place generation above) ----------
+// Events aren't a separate concept in the data model — see the eventDate note on
+// sanitizePlaceItem() above. This whole flow just produces ordinary places[] entries with that
+// field set, appended the same way Places generation appends its results.
+function openEventsModal(){
+  document.getElementById('events-step-setup').classList.remove('hidden');
+  document.getElementById('events-step-instructions').classList.add('hidden');
+  document.getElementById('events-step-preview').classList.add('hidden');
+  document.getElementById('events-error').textContent = '';
+  document.getElementById('events-response').value = '';
+  document.getElementById('events-count').value = 6;
+  document.getElementById('events-notes').value = '';
+
+  const citySel = document.getElementById('events-city');
+  const cities = tripData?.meta?.cities || [];
+  citySel.innerHTML = cities.length
+    ? cities.map(c=>`<option value="${c.name}">${c.name}${c.country ? ', '+c.country : ''}</option>`).join('')
+    : '<option value="">(none — add a city first)</option>';
+  document.getElementById('events-no-cities-hint').classList.toggle('hidden', cities.length > 0);
+
+  // Prefill from the trip's own date range — the whole point of an events search is usually
+  // "what's on while I'm actually there," editable here for just this one batch.
+  document.getElementById('events-date-from').value = tripData?.meta?.startDate || '';
+  document.getElementById('events-date-to').value = tripData?.meta?.endDate || '';
+
+  document.getElementById('events-modal').classList.remove('hidden');
+}
+document.getElementById('btn-events-generate').addEventListener('click', openEventsModal);
+document.getElementById('events-open-edit-trip').addEventListener('click', ()=>{
+  closeEventsModal();
+  openEditTripModal('edit');
+});
+function closeEventsModal(){ document.getElementById('events-modal').classList.add('hidden'); }
+['events-cancel-1','events-cancel-2','events-cancel-3'].forEach(id=>document.getElementById(id).addEventListener('click', closeEventsModal));
+document.getElementById('events-modal').addEventListener('click', e=>{
+  if(e.target.id === 'events-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeEventsModal();
+});
+document.getElementById('events-back-2').addEventListener('click', ()=>{
+  document.getElementById('events-step-instructions').classList.add('hidden');
+  document.getElementById('events-step-setup').classList.remove('hidden');
+});
+document.getElementById('events-back-3').addEventListener('click', ()=>{
+  document.getElementById('events-step-preview').classList.add('hidden');
+  document.getElementById('events-step-instructions').classList.remove('hidden');
+});
+
+const EVENT_SCHEMA_DOC = `Each item in the array must match this exact shape (use null for unknown optional fields; omit "coords" entirely unless you're actually confident — don't invent coordinates):
+{
+  "name": string (required — the event's actual name, not a generic description),
+  "eventDate": string (required — "YYYY-MM-DD", must fall within the given date range),
+  "city": string,
+  "area": string (neighborhood/district or venue name),
+  "cat": array of lowercase strings — always include "event", plus whatever else fits (e.g. "food", "shopping", "nightlife"),
+  "wantRating": integer 1-10 or null (how strongly to prioritize this),
+  "price": { "amount": number or null, "currency": ISO 4217 code or null, "note": string e.g. "Free" / "per person" },
+  "hours": { "open": "HH:MM" 24h or null (the event's start time), "close": "HH:MM" 24h or null (end time, if known), "note": string for anything else },
+  "certainty": "green" | "yellow" | "red" — how confident you actually are this happens on this date; use "red" rather than inventing specifics if unsure,
+  "note": string (anything else worth knowing),
+  "wishlist": array of strings — specific things to catch there, if relevant,
+  "links": array of { "label": string, "url": string } for an official page/ticketing, only if real,
+  "coords": { "lat": number, "lng": number } — only if genuinely confident
+}`;
+
+function buildEventsInstruction(){
+  const city = document.getElementById('events-city').value;
+  const count = document.getElementById('events-count').value || '6';
+  const dateFrom = document.getElementById('events-date-from').value;
+  const dateTo = document.getElementById('events-date-to').value;
+  const notes = document.getElementById('events-notes').value.trim();
+  const existingNames = (tripData?.places||[]).map(p=>p.name).filter(Boolean);
+
+  const lines = [];
+  lines.push(`Find specific, real events happening in ${city || 'the destination'}${dateFrom && dateTo ? ` between ${dateFrom} and ${dateTo}` : ''} — concerts, markets, festivals, exhibitions, seasonal happenings, anything a visitor could actually attend. Not generic recurring things like "shops are open" — actual dated events.`);
+  lines.push(`Be honest about uncertainty: if you're not confident an event is really happening on a specific date, mark it "certainty":"red" rather than inventing a plausible-sounding date.`);
+  lines.push(`Suggest roughly ${count} events.`);
+  if(notes) lines.push(`Notes specific to this batch: ${notes}`);
+  if(existingNames.length) lines.push(`Do NOT include any of these — they're already on the list: ${existingNames.join(', ')}.`);
+  lines.push('');
+  lines.push(EVENT_SCHEMA_DOC);
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+document.getElementById('events-build').addEventListener('click', ()=>{
+  document.getElementById('events-instructions').value = buildEventsInstruction();
+  document.getElementById('events-step-setup').classList.add('hidden');
+  document.getElementById('events-step-instructions').classList.remove('hidden');
+});
+document.getElementById('events-build-and-direct-call').addEventListener('click', ()=>{
+  document.getElementById('events-instructions').value = buildEventsInstruction();
+  document.getElementById('events-step-setup').classList.add('hidden');
+  document.getElementById('events-step-instructions').classList.remove('hidden');
+  document.getElementById('events-direct-call').click();
+});
+document.getElementById('events-copy').addEventListener('click', async ()=>{
+  const btn = document.getElementById('events-copy');
+  try{
+    await navigator.clipboard.writeText(document.getElementById('events-instructions').value);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }catch(err){
+    alert('Could not copy automatically — select the text and copy manually.');
+  }
+});
+document.getElementById('events-direct-call').addEventListener('click', ()=>{
+  callAiDirect(document.getElementById('events-instructions').value, {
+    statusEl: document.getElementById('events-direct-status'),
+    errEl: document.getElementById('events-error'),
+    textareaId: 'events-response',
+    validateBtnId: 'events-validate',
+    button: document.getElementById('events-direct-call')
+  });
+});
+
+function validateEventsResponse(){
+  const errEl = document.getElementById('events-error');
+  errEl.textContent = '';
+  let parsed;
+  try{
+    parsed = JSON.parse(document.getElementById('events-response').value);
+  }catch(err){
+    errEl.textContent = 'Could not parse as JSON: ' + err.message;
+    return null;
+  }
+  if(!Array.isArray(parsed)){
+    errEl.textContent = 'Expected a JSON array of event objects at the top level.';
+    return null;
+  }
+  const errors = [];
+  const events = parsed.map((item,i)=>sanitizePlaceItem(item, errors, i, { source: { ai: true, user: false }, requireEventDate: true })).filter(Boolean);
+  if(errors.length){
+    errEl.textContent = `Found ${errors.length} problem(s):\n` + errors.join('\n');
+    return null;
+  }
+  if(!events.length){
+    errEl.textContent = 'No events found in the response.';
+    return null;
+  }
+  // cat isn't validated by sanitizePlaceItem beyond "array of strings" — make sure "event" is
+  // always present regardless of whether the AI actually included it, since that tag is what makes
+  // this show up as an event anywhere the app filters/badges by category.
+  events.forEach(ev=>{ if(!ev.cat.includes('event')) ev.cat = [...ev.cat, 'event']; });
+  return events;
+}
+
+let eventsPreviewPlaces = [];
+let eventsPreviewChecked = new Set();
+document.getElementById('events-validate').addEventListener('click', ()=>{
+  const events = validateEventsResponse();
+  if(!events) return;
+  eventsPreviewPlaces = events;
+  const existingNames = aiPreviewDuplicateNames();
+  eventsPreviewChecked = new Set(events.map((e,i)=>i).filter(i=>!existingNames.has((events[i].name||'').trim().toLowerCase())));
+  renderEventsPreview();
+  document.getElementById('events-step-setup').classList.add('hidden');
+  document.getElementById('events-step-instructions').classList.add('hidden');
+  document.getElementById('events-step-preview').classList.remove('hidden');
+});
+
+function formatEventDate(iso){
+  if(!iso) return '';
+  const d = new Date(iso+'T00:00:00');
+  return d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+}
+
+function renderEventsPreview(){
+  const existingNames = aiPreviewDuplicateNames();
+  const el = document.getElementById('events-preview-list');
+  el.innerHTML = eventsPreviewPlaces.map((ev, i)=>{
+    const isDup = existingNames.has((ev.name||'').trim().toLowerCase());
+    const isChecked = eventsPreviewChecked.has(i);
+    const timeStr = ev.hours?.open ? ` at ${ev.hours.open}` : '';
+    const meta = [ev.city, ev.area].filter(Boolean).join(' · ');
+    return `<div class="ai-preview-row" data-idx="${i}">
+      <input type="checkbox" class="events-preview-check" data-idx="${i}" ${isChecked?'checked':''}>
+      <div style="flex:1; min-width:0;">
+        <div class="place-name">${ev.name}${isDup?' <span class="badge b-red">Possible duplicate</span>':''}</div>
+        <div class="place-meta"><span class="badge">📅 ${formatEventDate(ev.eventDate)}${timeStr}</span> ${certBadge(ev.certainty)}</div>
+        ${meta ? `<div class="place-meta">${meta}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+document.getElementById('events-preview-list').addEventListener('click', e=>{
+  if(e.target.closest('a, button, input')) return;
+  const row = e.target.closest('.ai-preview-row');
+  if(!row) return;
+  const idx = Number(row.dataset.idx);
+  const checked = !eventsPreviewChecked.has(idx);
+  if(checked) eventsPreviewChecked.add(idx); else eventsPreviewChecked.delete(idx);
+  const cb = row.querySelector('.events-preview-check');
+  if(cb) cb.checked = checked;
+});
+document.getElementById('events-preview-list').addEventListener('change', e=>{
+  if(!e.target.classList.contains('events-preview-check')) return;
+  const idx = Number(e.target.dataset.idx);
+  if(e.target.checked) eventsPreviewChecked.add(idx); else eventsPreviewChecked.delete(idx);
+});
+
+document.getElementById('events-import').addEventListener('click', async ()=>{
+  const toAdd = Array.from(eventsPreviewChecked).map(i=>eventsPreviewPlaces[i]);
+  if(!toAdd.length){ closeEventsModal(); return; }
+  const places = (tripData.places || []).concat(toAdd);
+  await db.collection('tripData').doc(currentTripId).update({ places });
+  await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  tripData.places = places;
+  renderPlaces();
+  closeEventsModal();
+  startCoordsFixer(); // newly-imported events need coordinate checking too, same as any AI place
+});
 
 // ---------- AI route generation (Tier 2, mirrors AI place generation above) ----------
 // Places without coords can't be geographically clustered, and the base-of-operations place

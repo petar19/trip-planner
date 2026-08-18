@@ -176,7 +176,14 @@ tripData/{tripId}                  — trip content, fetched once per open, over
                                // via the Frankfurter API when the two differ (see "Stack").
         hours: { open, close, note },  // open/close are "HH:MM" 24h picker values, null if unset;
                                // note carries cases a simple range can't ("Always", "Guard change
-                               // ~12:00", seasonal closures) — same pattern as price above
+                               // ~12:00", seasonal closures) — same pattern as price above. For an
+                               // event (see eventDate below), open/close double as the event's
+                               // start/end time rather than a daily schedule.
+        eventDate,             // "YYYY-MM-DD" or absent/null — marks this place as a one-time dated
+                               // event rather than an always-visitable destination. See "Events"
+                               // below — there's no separate events collection or array; an event
+                               // IS a place, just with this field set (and "event" in cat[]).
+                               // Absent on every ordinary place.
         note, certainty,
         wishlist: [ string, ... ],  // specific things wanted AT this place — which exhibits to
                                // see in a museum, which dishes to eat at a restaurant. Distinct
@@ -294,15 +301,10 @@ tripData/{tripId}                  — trip content, fetched once per open, over
       // shrinking date range just drops out of assignedRoutes with the day; the route itself is
       // untouched, no separate cleanup needed anywhere else.
     ],
-    events: [ { name, certainty, desc } ],  // Events tab (nav) is still a stub ("Not built yet.") —
-                               // this field exists in the schema but nothing reads/writes it yet.
-                               // Planned direction: finding real-world local events (concerts,
-                               // markets, festivals) during the trip's dates and converting them
-                               // into places with a specific date/time and category — needs either
-                               // a real external events API (Ticketmaster/Eventbrite-type) or,
-                               // now that Tier 3 direct AI calls exist, giving the AI web-search/
-                               // tool-use capability instead of hand-rolling a free events API
-                               // integration. Not scoped beyond that yet.
+    // No `events` array — dropped entirely (see "Events" below). Events aren't a separate concept:
+    // an event is just a places[] entry with `eventDate` set and `cat` including "event". Same
+    // reasoning as "no separate food array" above — one list, filtered/badged by tag, not a
+    // duplicated schema for something that's really just a kind of place.
     expenses: [   // Phase (post-Phase-7 roadmap) — freestanding manual costs not tied to a
                   // specific stop visit. Renamed from the original schema's always-empty
                   // `budget: []` stub, which nothing ever read or wrote — see "Budget tab" below
@@ -796,7 +798,59 @@ All three tiers feed the same validation → preview → edit pipeline. The full
 below (staging in `localStorage` before an explicit "Save trip") isn't built yet; the places-only
 generator above writes directly to an already-saved trip instead.
 
-## Draft flow (Phase 2)
+## Events
+
+**No separate Events tab, no separate `events[]` array.** Originally planned as its own nav tab; a
+dedicated tab would have repeated exactly the mistake this app already avoided once (see the
+schema's "no separate food array" note) — an event isn't a fundamentally different kind of thing
+from a place, it's a place with a date attached. Confirmed with the user before building rather than
+assumed. An event is a plain `places[]` entry with `eventDate` set (`"YYYY-MM-DD"`) and `cat`
+including `"event"` — everything else the app already does with places (map display, adding to
+routes, rating/reviewing, category filtering) works on an event for free, no new plumbing needed.
+
+✅ **Implemented: "📅 Generate events with AI"** button in the Places tab, next to "✨ Generate with
+AI" — a near-complete mirror of the Places AI-generation flow (setup → instructions → paste-back or
+"✨ Generate via AI directly" (Tier 3) → validate → checklist preview → import), reusing
+`sanitizePlaceItem()` (extended with an `opts.requireEventDate` flag — see the schema note above),
+`callAiDirect()`, and the same Back/Cancel step navigation, rather than a parallel implementation.
+Deliberately simpler than Places generation in two ways: setup only asks for city, rough count, and
+a date range (defaulting to the trip's own `startDate`/`endDate` — the actual point of an events
+search is usually "what's on while I'm there," not a fully independent range) plus optional
+free-text notes, skipping the full preferences form (budget, base of operations, travel methods,
+etc.) that doesn't apply to finding events; and there's no card-review step — a big photo card suits
+"should I visit this place" better than "what's happening on this date," so the checklist alone
+(name, a "📅 <date>" badge, certainty badge, city/area, duplicate flag) is enough.
+
+The generation instruction explicitly asks the AI to mark `certainty:"red"` rather than invent a
+plausible-sounding date it isn't actually confident about, and the setup screen carries a visible
+disclaimer ("The AI may not have fully up-to-date event listings — always verify dates/times before
+relying on them"). **Grounding deliberately not wired in for this pass**: Gemini supports Google
+Search grounding (genuinely useful here — the model's own training data can't know what's actually
+happening on a specific future date) and it's practically free at this app's scale (5,000 free
+grounded queries/month), but researching the exact request syntax for it turned up inconsistent/
+conflicting documentation, including what looks like Google migrating to a new "Interactions" API
+surface distinct from the classic `generateContent` endpoint `functions/index.js` already uses and
+has verified working. Given this project has already hit two real breakages this same evening from
+Gemini's API surface shifting underneath it (a retired model id, `firebase-admin`'s API changing
+between major versions), shipping an unverified grounding integration risked a third — deferred
+until the syntax can be confirmed properly, flagged here rather than guessed at.
+
+Imported events append to `tripData.places` exactly like Places generation does, and also trigger
+`startCoordsFixer()` afterward — an event's venue needs the same coordinate verification any
+AI-suggested place does.
+
+✅ **Colored category borders** (Places tab list only, for now): each row's left edge gets a 4px
+accent border colored by which of six broad groups its `cat[]` tags fall into —
+`categoryGroupColor()` checks event first (a date-bound event is the most specific thing to flag,
+and always carries the `"event"` tag), then food/museums-and-landmarks/parks-and-nature/shopping,
+falling back to a neutral "other" color (`var(--ink-soft)`) for anything that doesn't match a
+keyword — including `"nightlife"`, which the user's six named groups didn't cover. Two new design
+system colors were added for this (`--plum` for events, `--rose` for shopping) alongside the
+existing `--mustard` (food) and `--moss` (parks) already documented in "Design system" below, which
+this reuses rather than duplicating. An event's row also gets a small plum "📅 <date>" badge next to
+its name (`.event-date-badge`), and the Places list's sort dropdown gained an "Event date (soonest
+first)" option (places with no `eventDate` sort last, same convention the existing price sort
+already uses for a missing amount).
 
 1. User starts a new trip. ✅ **Revised from the original plan**: "New trip" and "Edit trip
    details" are now the same modal (one shared form, a `tripModalIsNew` flag switches Save between
@@ -840,7 +894,7 @@ to the AI and to the manual editor's valid placeId set. Display still falls back
 computed bookend for routes saved before this change (`stops[]` without the base in it) via
 `isBaseStop()`, so nothing already saved breaks — see the stop-shape schema note above.
 
-✅ **Implemented (generation only)**: a "Routes" tab (between Places and Events) with "✨ Generate
+✅ **Implemented (generation only)**: a "Routes" tab with "✨ Generate
 routes with AI", mirroring the Places AI-generation pipeline exactly (setup → instruction template
 → paste-back JSON → validate → checklist preview → import). Setup picks one of the trip's cities
 plus max-steps-per-day/travel-methods (prefilled from trip preferences, editable per-batch like the
@@ -1858,7 +1912,9 @@ multi-tab support alongside it, since both people may have the app open in more 
 ## Design system
 
 - **Colors** (CSS custom properties): `--paper`/`--ink` = background/text base; `--harbor` (teal)
-  = water/transit; `--mustard` = food; `--moss` = outdoor/parks; `--red` = alerts/danger/delete.
+  = water/transit/museums-landmarks; `--mustard` = food; `--moss` = outdoor/parks; `--red` =
+  alerts/danger/delete; `--plum` = events; `--rose` = shopping — the last two exist specifically
+  for the Places list's category-group border colors (see "Events").
 - **Fonts**: Fraunces (serif, headers) / Inter (sans, body) / JetBrains Mono (data, labels).
 - **Components**: rounded cards (`.card`), pill tags (`.tag`, `.badge`), sticky tab nav, day-stop
   vertical timeline with a dashed connector.
@@ -1909,6 +1965,11 @@ multi-tab support alongside it, since both people may have the app open in more 
   authenticated end-to-end generation still needs manual in-browser testing as a signed-in
   allowlisted user. Artifact Registry cleanup policy set (1-day image retention) to avoid
   accumulating container-image storage costs across future deploys.
+- ✅ Events: no separate tab or schema — a "📅 Generate events with AI" button in the Places tab
+  produces ordinary `places[]` entries with `eventDate` set (mirrors the Places AI-generation
+  pipeline, minus the full preferences form and the card-review step) — see "Events". The Places
+  list gets a colored left-border per category group (food/museums/parks/events/shopping/other), an
+  event date badge, and an "Event date" sort option as part of the same change.
 - ✅ Place source tracking (AI vs user, see places[].source above), filterable
 - ✅ "Edit trip details" (Overview tab): editable dates/cities/currency after creation (fixes AI
   generation being stuck with no city to pick if none was set at New Trip time) plus the full
