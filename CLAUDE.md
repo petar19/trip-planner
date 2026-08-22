@@ -184,6 +184,12 @@ tripData/{tripId}                  — trip content, fetched once per open, over
                                // below — there's no separate events collection or array; an event
                                // IS a place, just with this field set (and "event" in cat[]).
                                // Absent on every ordinary place.
+        aiFacts,               // string or absent/null — free-text "interesting facts" fetched via
+                               // the "✨ Tell me more" button (Day-by-day Level 3, see "AI
+                               // generation model"). Deliberately its own field, not appended to
+                               // `note` — keeps AI-sourced content distinctly separate from
+                               // anything the user wrote themselves. No grounding, so this is
+                               // "interesting," not "verified," facts.
         note, certainty,
         wishlist: [ string, ... ],  // specific things wanted AT this place — which exhibits to
                                // see in a museum, which dishes to eat at a restaurant. Distinct
@@ -771,28 +777,70 @@ original "Ask AI about this place" idea was one vague per-place action covering 
 it's since been split into two concrete, independently-scoped backlog items, neither blocked on
 infrastructure anymore, just on their own design/implementation:
 
-⬜ **"AI Verify" on the place edit modal** — sends the place's full current data (name, city, area,
-cat, price, hours, note, wishlist, links, coords, etc.) to the AI asking it to fact-check and
-suggest corrections, then shows current-vs-AI-recommended side by side with differences highlighted,
-letting the user accept changes individually rather than all-or-nothing — likely reusing patterns
-from the AI place-import card review (colored per-item accept/reject). Open question carried over
-from the original idea: a real fact-check needs live web search/grounding, since the model's own
-training data can't confirm current hours/prices — whether/how to give the Cloud Function that
-capability isn't decided yet.
+✅ **Implemented: "AI Verify" on the place edit modal** (`#ai-verify-modal`, "🤖 AI Verify" button in
+`#place-modal`'s action row, opens on top of it same as the AI card review stacks over the checklist).
+Sends the modal's own *current form values* (not the saved place — the user may already have unsaved
+edits open) to the AI, asking it to review and suggest corrections in the exact shape
+`sanitizePlaceItem()` already validates (reused directly — one definition of "what a valid place
+object looks like," same as everywhere else in the app). The diff is computed client-side
+(`JSON.stringify` comparison per field) and only shows fields that actually differ — a field the AI
+left untouched never appears, so a "no changes" response renders zero rows rather than a wall of
+identical current-vs-suggested pairs. Each differing field gets its own checkbox (default
+**unchecked** — deliberately more conservative than the AI-import checklist's default-checked,
+since this modifies data the user already trusts rather than adding something new) and a two-column
+current/suggested comparison. "Apply selected" writes accepted fields straight into the *live form
+inputs* (`pl-name`, `pl-price-amount`, `currentCats` + `renderCatChips()`, rebuilding
+`#pl-links-list` via `addLinkRow()` for the links field, etc.) — it never touches Firestore itself;
+"Save place" (the modal's own button, right underneath) is still the one real commit step, same as
+every other edit in this app. Same no-grounding caveat as Events/"Tell me more": the AI can't
+confirm anything is actually current, only draw on training knowledge, so the modal carries an
+explicit disclaimer rather than implying a real fact-check.
 
-⬜ **"Tell me more" on Day-by-day's single-stop view (Level 3)** — a free-text "interesting facts
-about this place" call, result saved either to a new dedicated field or appended to an existing note
-— which one is still an open question (candidates: `places[].note`, the route-stop's own planning
-note, or a new field entirely so AI-sourced facts don't get mixed in with what the user wrote
-themselves).
+**Refactor along the way**: extracted `readPlaceFormValues()` out of `savePlace()`'s inline
+object-building — needed a way to read "what's currently in the form" for the diff without
+duplicating that logic a second time. Verified the refactor didn't change `savePlace()`'s behavior
+via a full round-trip test (open the modal against a place with every field populated, save, compare
+the written object to the original) before trusting it. That same pass caught a real, independent
+bug: `places[].aiFacts` (see "Tell me more" above) wasn't being preserved through `savePlace()` at
+all — since it's not a form field, every save of a place that had AI facts would have silently
+wiped them. Fixed as part of the same change, confirmed via the same round-trip test.
 
-✅ **"What's nearby?" — the non-AI half is done, see "Day-by-day tab" below** (the "🔍 Nearby
-places" dialog: radius + category filter over the trip's own saved places, browser geolocation).
-What's still just an idea, not built: extending that dialog with live AI-suggested *general*
-options beyond what's already saved (e.g. "I want pizza" pulling in real nearby restaurants the
-trip hasn't saved yet) — same web-search/grounding open question as "AI Verify" above, and would
-need deciding how a chosen AI-suggested result gets turned into a real `places[]` entry before it
-could be added to a route.
+✅ **Implemented: "Tell me more" on Day-by-day's single-stop view (Level 3)** — a "✨ Tell me more
+about this place" button (relabels to "✨ Refresh facts" once already fetched) calls
+`generateAiContent` with a plain free-text prompt (no JSON schema, no validation pipeline — this is
+the one AI feature in the app that isn't structured-data generation) and writes the result straight
+into a new `places[].aiFacts` field, resolving the open question in favor of **a new dedicated
+field** rather than appending to `places[].note` or a route-stop's planning note — keeps AI-sourced
+content distinctly separate from anything the user wrote themselves, consistent with this app's
+existing note-differentiation work (see "Design system" below). Rendered via `placeDetailHtml()`
+(`.place-ai-facts`, its own soft-mustard styled block, distinct from `.place-general-note` and
+`.route-stop-note`) wherever that function is called — not Day-by-day-only, since it's genuinely
+place-level data, so it shows in the Places tab and Routes' expanded view too once fetched. Same
+"no grounding yet" caveat as the Events feature: the model can't confirm anything current, only
+draw on its training knowledge, so this is framed as "interesting facts," not "verified facts."
+Verified with a mocked `cloudFunctions.httpsCallable()`/`db.collection()` (no real auth session
+available for testing) that the full flow — button disables, spinner shows, `tripData.places` and
+Firestore both get the new field, re-render reflects it — works end to end, and that a failure
+correctly re-enables the button with a clear message rather than leaving it stuck spinning.
+
+✅ **"What's nearby?" — fully implemented, see "Day-by-day tab" below.** The base dialog (radius +
+category filter over the trip's own saved places, browser geolocation) plus, now, an "✨ Ask AI"
+free-text query (`np-ai-query`/`np-ai-ask`) alongside it — reuses `AI_PLACE_SCHEMA_DOC` and
+`sanitizePlaceItem()` (same "what's a valid place" definition as everywhere else) to get back a
+JSON array of suggestions near `npReferencePoint`, rendered as their own "✨ AI suggestions" section
+below the saved-places results, distinct border color, clearly labeled "not yet saved to this trip."
+Same no-grounding caveat as AI Verify/"Tell me more": the model can't do a live search, so the
+prompt explicitly tells it to leave out anything it isn't genuinely confident exists at that
+location rather than guessing, and the dialog's hint text sets that expectation up front.
+
+**How a chosen suggestion becomes a real `places[]` entry** (the open question from the original
+idea): `addNearbyResultToToday(place)` — extracted from the saved-places "+ Add to today" handler,
+now shared by both — checks whether the place already exists in `tripData.places` (by id); a
+saved-place result already does, an AI suggestion doesn't, so the function conditionally adds it
+before doing the same route-creation-and-day-assignment work either way. One function instead of
+two near-duplicate handlers, and the two paths can't drift on how routes/day-assignment work. An
+AI-added place also triggers `startCoordsFixer([place])` afterward, same as any other AI-sourced
+import — it doesn't have coordinates yet.
 
 All three tiers feed the same validation → preview → edit pipeline. The full new-trip Draft flow
 below (staging in `localStorage` before an explicit "Save trip") isn't built yet; the places-only
@@ -1941,7 +1989,8 @@ multi-tab support alongside it, since both people may have the app open in more 
   (`placeDetailHtml()`, the Routes tab's expanded view, the Places tab list). `placeDetailHtml()`
   takes the route note as `opts.routeNote` rather than the caller appending its own separately-
   styled line after the call, so the two notes always end up adjacent and consistently styled
-  regardless of caller.
+  regardless of caller. `places[].aiFacts` (see "AI generation model" → "Tell me more") gets the
+  same treatment — its own soft-mustard block (`.place-ai-facts`), never merged into `note`.
 - Keep new UI consistent with these rather than introducing new colors/fonts per feature.
 
 ## Current status
@@ -1970,6 +2019,9 @@ multi-tab support alongside it, since both people may have the app open in more 
   pipeline, minus the full preferences form and the card-review step) — see "Events". The Places
   list gets a colored left-border per category group (food/museums/parks/events/shopping/other), an
   event date badge, and an "Event date" sort option as part of the same change.
+- ✅ "AI Verify" on the place edit modal: reviews the form's current values, shows a field-by-field
+  diff against the AI's suggestions, lets the user selectively apply corrections into the form
+  (never saves directly) — see "AI generation model" → "AI Verify"
 - ✅ Place source tracking (AI vs user, see places[].source above), filterable
 - ✅ "Edit trip details" (Overview tab): editable dates/cities/currency after creation (fixes AI
   generation being stuck with no city to pick if none was set at New Trip time) plus the full
@@ -2040,16 +2092,19 @@ multi-tab support alongside it, since both people may have the app open in more 
 - ✅ Day-by-day tab (Phase 4 assignment + Phase 5 execution): a "+ Add routes" checklist assigns
   routes to the selected day (moved here from the Routes tab, see "Day-by-day tab" above), plus a
   "🔍 Nearby places" dialog next to it (browser geolocation + radius + category filter over the
-  trip's saved places, adds a result as a single-stop route on the current day — no new data
-  structure needed, see "Day-by-day tab" above) → route
+  trip's saved places, plus an "✨ Ask AI" free-text query for general suggestions beyond what's
+  saved — adds a result as a single-stop route on the current day either way, no new data structure
+  needed, see "Day-by-day tab" above) → route
   overview (one assigned-route row per line, list+sticky map reusing the Routes tab's
   expandable-view code, with reorder/remove, full Places-tab-level detail per stop via the shared
   `placeDetailHtml()`) → single-stop execution view (same full detail plus an interactive wishlist
   checklist, Prev/Next navigation with an "N / M" counter, a 1-5 full-width star rating + one review
   textarea replacing the old numeric rating/two-note-fields/manual-done-checkbox combo — done is now
-  auto-set from rating/review) — see "Day-by-day tab" above. `days[]` auto-syncs to the trip's date
-  range. Reaching a stop's detail view the first time is still manual (no auto-advance to the next
-  undone stop on entry)
+  auto-set from rating/review), plus a "✨ Tell me more about this place" button that fetches
+  free-text facts via Tier 3 into a new `places[].aiFacts` field, shown via `placeDetailHtml()`
+  wherever a place renders, not just Day-by-day — see "AI generation model" → "Tell me more".
+  `days[]` auto-syncs to the trip's date range. Reaching a stop's detail view the first time is
+  still manual (no auto-advance to the next undone stop on entry)
 - ✅ Multi-user access control (Phase 7): the trip picker and Firestore rules now both filter by
   `participants`, closing a real gap where every allowlisted user could see every trip — see
   "Multi-user sharing" above. "Manage collaborators" (invite/remove/leave) on the Overview tab, and

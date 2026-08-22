@@ -180,6 +180,7 @@
   .field-note-chip{display:inline-block; background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:0 6px; font-size:.78rem; color:var(--ink-soft);}
   .place-general-note{font-style:italic; background:var(--paper); border-radius:8px; padding:6px 10px; margin-top:6px; font-size:.88rem;}
   .route-stop-note{background:var(--harbor-soft); border-radius:8px; padding:6px 10px; margin-top:6px; font-size:.88rem;}
+  .place-ai-facts{background:var(--mustard-soft); border-radius:8px; padding:6px 10px; margin-top:6px; font-size:.88rem; white-space:pre-line;}
   /* Wishlist as a checklist of mini-goals (Day-by-day Level 3) rather than a plain comma line */
   .wishlist-list{margin-top:8px;}
   .wishlist-item{display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer; font-size:.88rem;}
@@ -281,6 +282,15 @@
      funnel through the same callAiDirect(), so one spinner covers both entry points). */
   .spinner{display:inline-block; width:13px; height:13px; border:2px solid var(--line); border-top-color:var(--harbor); border-radius:50%; vertical-align:middle; margin-right:6px; animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* AI Verify diff view (#ai-verify-modal) — one row per field the AI's suggestion actually
+     differs on, a checkbox to accept it, and a two-column current-vs-suggested comparison. */
+  .ai-verify-row{border-bottom:1px solid var(--line); padding:10px 0;}
+  .ai-verify-row:last-child{border-bottom:none;}
+  .ai-verify-row-check{display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px;}
+  .ai-verify-row-check input{width:16px; height:16px; accent-color:var(--harbor); cursor:pointer;}
+  .ai-verify-diff-cols{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-left:24px;}
+  .ai-verify-col{font-size:.85rem; background:var(--paper); border-radius:8px; padding:6px 10px; overflow-wrap:break-word;}
 
   /* Category chips */
   .cat-picker{display:flex; flex-wrap:wrap; gap:6px;}
@@ -686,8 +696,26 @@
     </div>
     <div id="pl-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em;"></div>
     <div class="modal-actions">
+      <button type="button" class="btn-small" id="pl-ai-verify">🤖 AI Verify</button>
       <button class="btn-cancel" id="pl-cancel">Cancel</button>
       <button class="btn-save" id="pl-save">Save place</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ AI VERIFY (opens on top of place-modal) ============ -->
+<div id="ai-verify-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:640px;">
+    <h3>AI Verify</h3>
+    <p class="hint">The AI's suggestions are based on its general knowledge, not a live lookup — it
+      can't confirm anything is actually current. Verify anything time-sensitive (hours, prices)
+      yourself before trusting it.</p>
+    <p class="hint" id="ai-verify-status"></p>
+    <div id="ai-verify-diff"></div>
+    <div id="ai-verify-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="ai-verify-cancel">Close</button>
+      <button class="btn-save" id="ai-verify-apply">Apply selected</button>
     </div>
   </div>
 </div>
@@ -1054,9 +1082,11 @@
   <div class="modal-box" style="width:1140px; max-width:95vw;">
     <h3>Nearby places</h3>
     <p class="hint">Finds places already saved in this trip within a radius of a location — for
-      something spontaneous, not necessarily on today's planned route. Adding one creates a
-      single-stop route for it and assigns it to the currently selected day, same as any other route
-      (it'll show up in Day-by-day with the same rating/review support).</p>
+      something spontaneous, not necessarily on today's planned route. Or ask the AI below for
+      general suggestions beyond what's already saved (it can't do a live search, so verify anything
+      before relying on it). Adding one creates a single-stop route for it and assigns it to the
+      currently selected day, same as any other route (it'll show up in Day-by-day with the same
+      rating/review support).</p>
     <p id="np-location-status" class="place-meta" style="margin:8px 0;"></p>
     <div class="modal-grid" style="margin-bottom:10px;">
       <div>
@@ -1069,6 +1099,11 @@
       </div>
     </div>
     <div id="np-cat-filter" class="cat-picker" style="margin-bottom:12px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
+      <input type="text" id="np-ai-query" placeholder="Or ask AI: what are you looking for? (e.g. &quot;pizza&quot;, &quot;live music&quot;)" style="flex:1; min-width:220px; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; box-sizing:border-box;">
+      <button type="button" class="btn-small" id="np-ai-ask">✨ Ask AI</button>
+    </div>
+    <p class="hint" id="np-ai-status" style="margin-bottom:12px;"></p>
     <div id="np-split" style="display:flex; gap:16px; align-items:flex-start;">
       <div id="np-list-pane" style="flex:1; min-width:0;">
         <div id="np-list"></div>
@@ -3304,63 +3339,87 @@ document.getElementById('place-modal').addEventListener('click', e=>{
   }
 });
 
+// The place-shaped subset readable straight off the open modal's form fields — shared by
+// savePlace() and the AI Verify feature (which needs "what's currently in the form" to diff
+// against the AI's suggestions, without touching Firestore). Deliberately excludes id/source/
+// photoChecked/coordsSource — those depend on whether this is a new place or an edit, which only
+// savePlace() knows about.
+function readPlaceFormValues(){
+  const links = Array.from(document.querySelectorAll('#pl-links-list .link-row')).map(row=>({
+    label: row.querySelector('.pl-link-label').value.trim(),
+    url: row.querySelector('.pl-link-url').value.trim()
+  })).filter(l=>l.label && l.url);
+  const wantVal = document.getElementById('pl-want').value;
+  const amountVal = document.getElementById('pl-price-amount').value;
+  const lat = document.getElementById('pl-lat').value;
+  const lng = document.getElementById('pl-lng').value;
+  return {
+    name: document.getElementById('pl-name').value.trim(),
+    city: document.getElementById('pl-city').value.trim(),
+    area: document.getElementById('pl-area').value.trim(),
+    cat: currentCats.slice(),
+    wantRating: wantVal !== '' ? Number(wantVal) : null,
+    price: {
+      amount: amountVal !== '' ? Number(amountVal) : null,
+      currency: document.getElementById('pl-price-currency').value || null,
+      note: document.getElementById('pl-price-note').value.trim()
+    },
+    hours: {
+      open: document.getElementById('pl-hours-open').value || null,
+      close: document.getElementById('pl-hours-close').value || null,
+      note: document.getElementById('pl-hours-note').value.trim()
+    },
+    certainty: document.getElementById('pl-certainty').value,
+    note: document.getElementById('pl-note').value.trim(),
+    wishlist: document.getElementById('pl-wishlist').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    links,
+    coords: (lat !== '' && lng !== '') ? { lat: Number(lat), lng: Number(lng) } : null
+  };
+}
+
 async function savePlace(){
-  const name = document.getElementById('pl-name').value.trim();
   const errEl = document.getElementById('pl-error');
   errEl.textContent = '';
-  if(!name){ errEl.textContent = 'Name is required.'; return; }
+  const form = readPlaceFormValues();
+  if(!form.name){ errEl.textContent = 'Name is required.'; return; }
 
-  const wantVal = document.getElementById('pl-want').value;
-  if(wantVal !== ''){
-    const n = Number(wantVal);
-    if(!Number.isInteger(n) || n < 1 || n > 10){ errEl.textContent = 'Want rating must be a whole number from 1 to 10.'; return; }
+  if(form.wantRating !== null && (!Number.isInteger(form.wantRating) || form.wantRating < 1 || form.wantRating > 10)){
+    errEl.textContent = 'Want rating must be a whole number from 1 to 10.'; return;
   }
 
   const lat = document.getElementById('pl-lat').value;
   const lng = document.getElementById('pl-lng').value;
   if((lat === '') !== (lng === '')){ errEl.textContent = 'Provide both latitude and longitude, or neither.'; return; }
 
-  const links = Array.from(document.querySelectorAll('#pl-links-list .link-row')).map(row=>({
-    label: row.querySelector('.pl-link-label').value.trim(),
-    url: row.querySelector('.pl-link-url').value.trim()
-  })).filter(l=>l.label && l.url);
-
-  const amountVal = document.getElementById('pl-price-amount').value;
-  const price = {
-    amount: amountVal !== '' ? Number(amountVal) : null,
-    currency: document.getElementById('pl-price-currency').value || null,
-    note: document.getElementById('pl-price-note').value.trim()
-  };
-  const hours = {
-    open: document.getElementById('pl-hours-open').value || null,
-    close: document.getElementById('pl-hours-close').value || null,
-    note: document.getElementById('pl-hours-note').value.trim()
-  };
-
   const place = {
-    id: editingPlaceIdx!=null ? tripData.places[editingPlaceIdx].id || slugify(name) : slugify(name),
-    name,
-    city: document.getElementById('pl-city').value.trim(),
-    area: document.getElementById('pl-area').value.trim(),
-    cat: currentCats.slice(),
-    wantRating: wantVal !== '' ? Number(wantVal) : null,
-    price,
-    hours,
-    certainty: document.getElementById('pl-certainty').value,
-    note: document.getElementById('pl-note').value.trim(),
-    wishlist: document.getElementById('pl-wishlist').value.split('\n').map(s=>s.trim()).filter(Boolean),
-    links,
+    id: editingPlaceIdx!=null ? tripData.places[editingPlaceIdx].id || slugify(form.name) : slugify(form.name),
+    name: form.name,
+    city: form.city,
+    area: form.area,
+    cat: form.cat,
+    wantRating: form.wantRating,
+    price: form.price,
+    hours: form.hours,
+    certainty: form.certainty,
+    note: form.note,
+    wishlist: form.wishlist,
+    links: form.links,
     source: {
       ai: editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].source?.ai : false,
       user: true
     },
     // A manually-added Thumbnail link means there's nothing left to auto-look-up; otherwise
     // preserve whatever the Wikipedia lookup already determined (found or not).
-    photoChecked: links.some(l=>isThumbnailLabel(l.label)) || (editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].photoChecked : false)
+    photoChecked: form.links.some(l=>isThumbnailLabel(l.label)) || (editingPlaceIdx!=null ? !!tripData.places[editingPlaceIdx].photoChecked : false)
   };
-  if(lat !== '' && lng !== ''){
-    place.coords = { lat: Number(lat), lng: Number(lng) };
+  if(form.coords){
+    place.coords = form.coords;
     place.coordsSource = 'user';
+  }
+  // aiFacts (see "Tell me more," Day-by-day Level 3) isn't a form field — preserve it across a save
+  // rather than silently dropping it, same as any other field the edit modal doesn't expose.
+  if(editingPlaceIdx!=null && tripData.places[editingPlaceIdx].aiFacts){
+    place.aiFacts = tripData.places[editingPlaceIdx].aiFacts;
   }
 
   const places = tripData.places ? tripData.places.slice() : [];
@@ -3399,6 +3458,160 @@ async function savePlace(){
   document.getElementById('place-modal').classList.add('hidden');
 }
 document.getElementById('pl-save').addEventListener('click', savePlace);
+
+// ---------- AI Verify (place edit) ----------
+// Sends the place-edit modal's own current form values to the AI, asking it to review and suggest
+// corrections in the same shape sanitizePlaceItem() already validates — reused here rather than a
+// second "what does a valid place look like" definition. Diffs the AI's response against what's
+// currently in the form (not the saved place — the user may already have unsaved edits open) and
+// shows only the fields that actually differ; accepting a field writes the suggested value back
+// into the live form inputs, it does NOT save directly — "Save place" is still the one real commit
+// step, same as every other edit in this app.
+const AI_VERIFY_FIELDS = [
+  { key: 'name', label: 'Name' },
+  { key: 'city', label: 'City' },
+  { key: 'area', label: 'Area' },
+  { key: 'cat', label: 'Categories' },
+  { key: 'wantRating', label: 'Want rating' },
+  { key: 'price', label: 'Price' },
+  { key: 'hours', label: 'Hours' },
+  { key: 'note', label: 'Note' },
+  { key: 'wishlist', label: 'Wishlist' },
+  { key: 'links', label: 'Links' }
+];
+function summarizeVerifyField(key, value){
+  switch(key){
+    case 'cat': return (value||[]).length ? value.join(', ') : '—';
+    case 'wantRating': return value != null ? `${value}/10` : '—';
+    case 'price': { const base = formatPriceBase(value); return [base, value?.note].filter(Boolean).join(' — ') || '—'; }
+    case 'hours': { const base = formatHours(value); return [base, value?.note].filter(Boolean).join(' — ') || '—'; }
+    case 'wishlist': return (value||[]).length ? value.join('; ') : '—';
+    case 'links': return (value||[]).length ? value.map(l=>`${l.label}: ${l.url}`).join('; ') : '—';
+    default: return value || '—';
+  }
+}
+function buildAiVerifyPrompt(current){
+  const lines = [];
+  lines.push(`Review this place's saved data and suggest corrections where you're confident something is wrong, outdated, or missing. Only change a field if you have a genuine reason to — leave anything you're not confident about exactly as given.`);
+  lines.push('');
+  lines.push('Current data:');
+  lines.push(JSON.stringify(current, null, 2));
+  lines.push('');
+  lines.push(AI_PLACE_SCHEMA_DOC);
+  lines.push('');
+  lines.push('Output ONLY a single raw JSON object in that exact shape (not an array) representing your reviewed/corrected version — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+let aiVerifyCurrent = null;
+let aiVerifySuggested = null;
+let aiVerifyChecked = new Set(); // indices into the differing-fields list actually shown
+
+document.getElementById('pl-ai-verify').addEventListener('click', async ()=>{
+  const current = readPlaceFormValues();
+  if(!current.name){ document.getElementById('pl-error').textContent = 'Name is required before AI Verify can check anything.'; return; }
+
+  const btn = document.getElementById('pl-ai-verify');
+  const statusEl = document.getElementById('ai-verify-status');
+  const errEl = document.getElementById('ai-verify-error');
+  document.getElementById('ai-verify-diff').innerHTML = '';
+  errEl.textContent = '';
+  aiVerifyChecked = new Set();
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = 'Asking AI…';
+  document.getElementById('ai-verify-modal').classList.remove('hidden');
+  statusEl.innerHTML = '<span class="spinner"></span>Asking AI to review this place…';
+
+  try{
+    const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt: buildAiVerifyPrompt(current) });
+    let parsed;
+    try{
+      parsed = JSON.parse(result.data.text);
+    }catch(err){
+      throw new Error(`AI response wasn't valid JSON: ${err.message}`);
+    }
+    const errors = [];
+    const suggested = sanitizePlaceItem(parsed, errors, 0, {});
+    if(!suggested) throw new Error(errors.join(' '));
+
+    aiVerifyCurrent = current;
+    aiVerifySuggested = suggested;
+    renderAiVerifyDiff();
+  }catch(err){
+    statusEl.textContent = '';
+    errEl.textContent = `AI Verify failed: ${err.message || err.code || 'unknown error'}`;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
+});
+
+function renderAiVerifyDiff(){
+  const statusEl = document.getElementById('ai-verify-status');
+  const el = document.getElementById('ai-verify-diff');
+  const diffFields = AI_VERIFY_FIELDS.filter(f => JSON.stringify(aiVerifyCurrent[f.key]) !== JSON.stringify(aiVerifySuggested[f.key]));
+  if(!diffFields.length){
+    statusEl.textContent = 'The AI didn\'t suggest any changes.';
+    el.innerHTML = '';
+    return;
+  }
+  statusEl.textContent = `The AI suggests changes to ${diffFields.length} field${diffFields.length===1?'':'s'} — review each before applying.`;
+  el.innerHTML = diffFields.map((f,i)=>`<div class="ai-verify-row">
+    <label class="ai-verify-row-check">
+      <input type="checkbox" class="ai-verify-check" data-key="${f.key}" ${aiVerifyChecked.has(f.key)?'checked':''}>
+      <strong>${f.label}</strong>
+    </label>
+    <div class="ai-verify-diff-cols">
+      <div class="ai-verify-col"><div class="place-meta">Current</div>${summarizeVerifyField(f.key, aiVerifyCurrent[f.key])}</div>
+      <div class="ai-verify-col"><div class="place-meta">AI suggests</div>${summarizeVerifyField(f.key, aiVerifySuggested[f.key])}</div>
+    </div>
+  </div>`).join('');
+}
+document.getElementById('ai-verify-diff').addEventListener('change', e=>{
+  if(!e.target.classList.contains('ai-verify-check')) return;
+  const key = e.target.dataset.key;
+  if(e.target.checked) aiVerifyChecked.add(key); else aiVerifyChecked.delete(key);
+});
+
+function closeAiVerifyModal(){ document.getElementById('ai-verify-modal').classList.add('hidden'); }
+document.getElementById('ai-verify-cancel').addEventListener('click', closeAiVerifyModal);
+document.getElementById('ai-verify-modal').addEventListener('click', e=>{
+  if(e.target.id === 'ai-verify-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeAiVerifyModal();
+});
+
+// Writes accepted fields back into the open place-edit modal's own form inputs — never straight to
+// Firestore. "Save place" (the modal's own button, still right there underneath) is the only real
+// commit step, same as every other edit in this app.
+document.getElementById('ai-verify-apply').addEventListener('click', ()=>{
+  const v = aiVerifySuggested;
+  if(aiVerifyChecked.has('name')) document.getElementById('pl-name').value = v.name || '';
+  if(aiVerifyChecked.has('city')) document.getElementById('pl-city').value = v.city || '';
+  if(aiVerifyChecked.has('area')) document.getElementById('pl-area').value = v.area || '';
+  if(aiVerifyChecked.has('wantRating')) document.getElementById('pl-want').value = v.wantRating ?? '';
+  if(aiVerifyChecked.has('cat')){
+    currentCats = (v.cat||[]).slice();
+    renderCatChips();
+  }
+  if(aiVerifyChecked.has('price')){
+    document.getElementById('pl-price-amount').value = v.price?.amount ?? '';
+    if(v.price?.currency) document.getElementById('pl-price-currency').value = v.price.currency;
+    document.getElementById('pl-price-note').value = v.price?.note || '';
+    updatePricePreview();
+  }
+  if(aiVerifyChecked.has('hours')){
+    document.getElementById('pl-hours-open').value = v.hours?.open || '';
+    document.getElementById('pl-hours-close').value = v.hours?.close || '';
+    document.getElementById('pl-hours-note').value = v.hours?.note || '';
+  }
+  if(aiVerifyChecked.has('note')) document.getElementById('pl-note').value = v.note || '';
+  if(aiVerifyChecked.has('wishlist')) document.getElementById('pl-wishlist').value = (v.wishlist||[]).join('\n');
+  if(aiVerifyChecked.has('links')){
+    document.getElementById('pl-links-list').innerHTML = '';
+    (v.links||[]).forEach(l=>addLinkRow(l.label, l.url));
+  }
+  closeAiVerifyModal();
+});
 
 async function deletePlace(idx){
   if(!confirm(`Delete "${tripData.places[idx].name}"?`)) return;
@@ -6185,12 +6398,13 @@ function npNearbyResults(){
 function renderNpList(){
   const el = document.getElementById('np-list');
   const results = npNearbyResults();
+  let savedHtml;
   if(!npReferencePoint){
-    el.innerHTML = '<p class="mono">Set a location above to see nearby places.</p>';
+    savedHtml = '<p class="mono">Set a location above to see nearby places.</p>';
   }else if(!results.length){
-    el.innerHTML = '<p class="mono">No saved places match within this radius/category.</p>';
+    savedHtml = '<p class="mono">No saved places match within this radius/category.</p>';
   }else{
-    el.innerHTML = results.map(({p,dist})=>`<div class="card" style="margin-bottom:10px;">
+    savedHtml = results.map(({p,dist})=>`<div class="card" style="margin-bottom:10px;">
       ${placeDetailHtml(p)}
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
         <span class="place-meta">${formatLegDistance(Math.round(dist))} away</span>
@@ -6198,6 +6412,19 @@ function renderNpList(){
       </div>
     </div>`).join('');
   }
+  // AI suggestions render as their own section, not merged into the radius-filtered saved-places
+  // list above — they're not scoped by npCatFilter, and each hasn't been saved to the trip at all
+  // yet (js-np-ai-add below adds the place AND the day-route in one action).
+  const aiHtml = npAiResults.length ? `
+    <div class="place-meta" style="margin:14px 0 6px; font-weight:600;">✨ AI suggestions (not yet saved to this trip)</div>
+    ${npAiResults.map((p,i)=>`<div class="card" style="margin-bottom:10px; border-color:var(--harbor);">
+      ${placeDetailHtml(p)}
+      <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+        <button type="button" class="btn-small js-np-ai-add" data-idx="${i}">+ Add to today</button>
+      </div>
+    </div>`).join('')}
+  ` : '';
+  el.innerHTML = savedHtml + aiHtml;
   updateDayPriceConversions(results.map(r=>r.p));
   renderNpMap(results);
 }
@@ -6253,7 +6480,10 @@ function openNearbyPlacesModal(){
   npReferencePoint = null;
   npRadiusKm = 1;
   npCatFilter = new Set();
+  npAiResults = [];
   document.getElementById('np-radius').value = 1;
+  document.getElementById('np-ai-query').value = '';
+  document.getElementById('np-ai-status').textContent = '';
   document.getElementById('nearby-places-modal').classList.remove('hidden');
   renderNpCatFilter();
   updateNpLocationStatus();
@@ -6271,17 +6501,13 @@ document.getElementById('np-radius').addEventListener('input', e=>{
   renderNpList();
 });
 
-// Deliberately does NOT close the dialog on add — a spontaneous "what's around me" search often
-// wants more than one result added in the same sitting, so each row gets its own inline "✓ Added"
-// feedback instead.
-document.getElementById('np-list').addEventListener('click', async e=>{
-  if(e.target.classList.contains('js-route-thumb')){ e.preventDefault(); openPhotoLightbox(e.target.src); return; }
-  const btn = e.target.closest('.js-np-add');
-  if(!btn) return;
-  const place = (tripData.places||[]).find(p=>p.id===btn.dataset.placeId);
-  if(!place) return;
-  btn.disabled = true;
-  btn.textContent = 'Adding…';
+// Shared by both "+ Add to today" buttons below — a saved-place result already exists in
+// tripData.places (just needs the route), an AI-suggested result doesn't yet (needs both). Single
+// function so the two paths can't drift on how the route/day-assignment half works.
+async function addNearbyResultToToday(place){
+  let places = tripData.places || [];
+  const alreadyExists = places.some(p => p.id === place.id);
+  if(!alreadyExists) places = places.concat([place]);
   const route = {
     id: 'route-nearby-' + slugify(place.name) + '-' + Date.now().toString(36),
     city: place.city || '',
@@ -6296,12 +6522,90 @@ document.getElementById('np-list').addEventListener('click', async e=>{
   const days = (tripData.days||[]).map(d => d.date === daysSelectedDate
     ? { ...d, assignedRoutes: [...(d.assignedRoutes||[]), route.id] }
     : d);
-  await db.collection('tripData').doc(currentTripId).update({ routes, days });
+  const patch = { routes, days };
+  if(!alreadyExists) patch.places = places;
+  await db.collection('tripData').doc(currentTripId).update(patch);
   await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
   tripData.routes = routes;
   tripData.days = days;
-  btn.textContent = '✓ Added';
-  renderDaysLevel2And3();
+  if(!alreadyExists) tripData.places = places;
+  return { addedNewPlace: !alreadyExists };
+}
+
+// Deliberately does NOT close the dialog on add — a spontaneous "what's around me" search often
+// wants more than one result added in the same sitting, so each row gets its own inline "✓ Added"
+// feedback instead.
+document.getElementById('np-list').addEventListener('click', async e=>{
+  if(e.target.classList.contains('js-route-thumb')){ e.preventDefault(); openPhotoLightbox(e.target.src); return; }
+  const addBtn = e.target.closest('.js-np-add');
+  if(addBtn){
+    const place = (tripData.places||[]).find(p=>p.id===addBtn.dataset.placeId);
+    if(!place) return;
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding…';
+    await addNearbyResultToToday(place);
+    addBtn.textContent = '✓ Added';
+    renderDaysLevel2And3();
+    return;
+  }
+  const aiAddBtn = e.target.closest('.js-np-ai-add');
+  if(aiAddBtn){
+    const place = npAiResults[Number(aiAddBtn.dataset.idx)];
+    if(!place) return;
+    aiAddBtn.disabled = true;
+    aiAddBtn.textContent = 'Adding…';
+    await addNearbyResultToToday(place);
+    aiAddBtn.textContent = '✓ Added';
+    startCoordsFixer([place]); // AI-suggested places need coordinate checking, same as any AI import
+    renderDaysLevel2And3();
+  }
+});
+
+// ---------- "What's nearby?" + AI ----------
+// Extends the radius/category search above with live AI-suggested general options beyond what's
+// already saved — reuses sanitizePlaceItem() (same "what does a valid place look like" definition
+// as everywhere else) and the same no-grounding caveat as Events/"Tell me more"/AI Verify: the
+// model can't do a live search, only draw on training knowledge, so results need verifying.
+let npAiResults = [];
+function buildNpAiPrompt(query){
+  const cityHint = (tripData?.meta?.cities||[]).map(c=>c.name).join(', ');
+  const lines = [];
+  lines.push(`Suggest real, specific places near latitude ${npReferencePoint.lat.toFixed(5)}, longitude ${npReferencePoint.lng.toFixed(5)}${cityHint ? ` (in or near ${cityHint})` : ''}, within about ${npRadiusKm}km, matching: "${query}".`);
+  lines.push(`Only suggest real, specific, named places you have genuine knowledge of — not generic descriptions. If you're not confident something exists at this exact location, leave it out rather than guessing.`);
+  lines.push('');
+  lines.push(AI_PLACE_SCHEMA_DOC);
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+document.getElementById('np-ai-ask').addEventListener('click', async ()=>{
+  const query = document.getElementById('np-ai-query').value.trim();
+  const statusEl = document.getElementById('np-ai-status');
+  if(!query){ statusEl.textContent = 'Type what you\'re looking for first.'; return; }
+  if(!npReferencePoint){ statusEl.textContent = 'Set a location above first.'; return; }
+  const btn = document.getElementById('np-ai-ask');
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = 'Asking…';
+  statusEl.innerHTML = '<span class="spinner"></span>Asking AI…';
+  try{
+    const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt: buildNpAiPrompt(query) });
+    let parsed;
+    try{ parsed = JSON.parse(result.data.text); }
+    catch(err){ throw new Error(`AI response wasn't valid JSON: ${err.message}`); }
+    if(!Array.isArray(parsed)) throw new Error('Expected a JSON array.');
+    const errors = [];
+    const results = parsed.map((item,i)=>sanitizePlaceItem(item, errors, i, { source: { ai: true, user: false } })).filter(Boolean);
+    if(!results.length) throw new Error(errors.length ? errors.join(' ') : 'No suggestions found.');
+    npAiResults = results;
+    statusEl.textContent = `${results.length} AI suggestion${results.length===1?'':'s'} below — not yet saved to this trip.`;
+    renderNpList();
+  }catch(err){
+    statusEl.textContent = `AI search failed: ${err.message || err.code || 'unknown error'}`;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
 });
 
 // Full Places-tab-level detail for one place — thumbnail, name/rating/badges, meta line
@@ -6377,6 +6681,7 @@ function placeDetailHtml(p, opts){
       ${catTags ? `<div style="margin-top:6px;">${catTags}</div>` : ''}
       ${p.note ? `<div class="place-general-note">${p.note}</div>` : ''}
       ${opts.routeNote ? `<div class="route-stop-note">${opts.routeNote}</div>` : ''}
+      ${p.aiFacts ? `<div class="place-ai-facts">✨ ${p.aiFacts}</div>` : ''}
       ${wishlistHtml}
       <div style="margin-top:6px;">
         <a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>${links}${relatedDocLinksHtml(p.id)}
@@ -6655,8 +6960,48 @@ function renderDayStopDetailHtml(route, stopIdx){
       ${stayStr ? `<p class="place-meta">Stay: ${stayStr}</p>` : ''}
       ${gapLine}
     </div>
+    <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <button type="button" class="btn-small" id="day-stop-tell-more">✨ ${p?.aiFacts ? 'Refresh facts' : 'Tell me more about this place'}</button>
+      <span class="place-meta" id="day-stop-tell-more-status"></span>
+    </div>
     ${ratingUI}
   </div>`;
+}
+
+// "Tell me more about this place" (Day-by-day Level 3 only) — a free-text AI call, distinct from
+// the structured place-generation flows: no schema to validate, just a paragraph of facts written
+// straight into a new places[].aiFacts field (kept separate from the user's own places[].note so
+// AI-sourced content never gets silently mixed into something the user wrote themselves — same
+// reasoning as the app's other note-differentiation work, see CLAUDE.md). Rendered via
+// placeDetailHtml() wherever it's called, not just here, since it's genuinely place-level data.
+async function fetchPlaceAiFacts(routeId, stopIdx){
+  const btn = document.getElementById('day-stop-tell-more');
+  const statusEl = document.getElementById('day-stop-tell-more-status');
+  const route = (tripData.routes||[]).find(r=>r.id===routeId);
+  if(!route) return;
+  const { places: routeStops } = normalizeRoute(route);
+  const stop = routeStops[stopIdx];
+  const place = (tripData.places||[]).find(pl=>pl.id===stop?.placeId);
+  if(!place) return;
+
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = 'Asking AI…';
+  statusEl.innerHTML = '<span class="spinner"></span>';
+  const prompt = `Tell me a few genuinely interesting facts about "${place.name}"${place.city ? ` in ${place.city}` : ''}${place.area ? `, ${place.area}` : ''} — history, notable details, or things a visitor might not already know. Keep it to a short paragraph or a few short bullet-style lines. Plain text only, no markdown formatting, no commentary about the request itself — just the facts.`;
+  try{
+    const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt });
+    const text = (result.data.text || '').trim();
+    const updatedPlaces = (tripData.places||[]).map(pl => pl.id===place.id ? { ...pl, aiFacts: text } : pl);
+    await db.collection('tripData').doc(currentTripId).update({ places: updatedPlaces });
+    tripData.places = updatedPlaces;
+    statusEl.textContent = '';
+    renderDaysLevel2And3();
+  }catch(err){
+    statusEl.textContent = `Failed: ${err.message || err.code || 'unknown error'}`;
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
 }
 
 // Single write path for a stop's whole per-person execution entry (star value + review text +
@@ -6743,6 +7088,10 @@ document.getElementById('days-content').addEventListener('click', e=>{
     btn.disabled = true;
     btn.textContent = 'Saving…';
     saveDayStopRating(daysSelectedRouteId, daysSelectedStopIndex, { rerender: true });
+    return;
+  }
+  if(e.target.id === 'day-stop-tell-more'){
+    fetchPlaceAiFacts(daysSelectedRouteId, daysSelectedStopIndex);
     return;
   }
   if(e.target.closest('a, button')) return; // don't also navigate into Level 3 from a link/button click
