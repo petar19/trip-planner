@@ -283,6 +283,14 @@
   .spinner{display:inline-block; width:13px; height:13px; border:2px solid var(--line); border-top-color:var(--harbor); border-radius:50%; vertical-align:middle; margin-right:6px; animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
 
+  /* Auto-generate wizard (#autogen-modal) — list pane auto-scrolls to keep the newest item in view
+     (JS, see runAutogen()). Entrance animation is opt-in via the "✨ Animate" toggle
+     (#autogen-animate-toggle) and purely cosmetic — it never gates or slows the actual generation
+     work, see runAutogen()'s use of animateFrame() vs a plain append. */
+  @keyframes autogenFadeIn{from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);}}
+  #autogen-list.animate .autogen-item{animation:autogenFadeIn .35s ease-out;}
+  #autogen-progress-bar{width:100%; height:10px; margin:10px 0 4px;}
+
   /* AI Verify diff view (#ai-verify-modal) — one row per field the AI's suggestion actually
      differs on, a checkbox to accept it, and a two-column current-vs-suggested comparison. */
   .ai-verify-row{border-bottom:1px solid var(--line); padding:10px 0;}
@@ -360,6 +368,7 @@
         <p id="tv-summary"></p>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
           <button class="btn-small" id="btn-edit-trip">Edit trip details</button>
+          <button class="btn-small" id="btn-autogen-trip">✨ Auto-generate places &amp; routes…</button>
           <button class="btn-small" id="btn-copy-trip">Copy this trip…</button>
           <button class="btn-small" id="btn-manage-collaborators">Manage collaborators…</button>
           <button class="btn-small" id="btn-publish-trip">Publish / Share…</button>
@@ -1038,13 +1047,10 @@
           <span id="route-calc-status" class="place-meta"></span>
         </div>
 
+        <!-- Search-to-add now renders per-stop, inside #route-editor-stops itself (see
+             renderRouteEditorStops()'s "insert after this stop" block) — there's no fixed
+             search box here anymore. -->
         <div id="route-editor-stops" style="margin-top:18px;"></div>
-
-        <div style="margin-top:10px; position:relative;">
-          <input type="text" id="route-editor-add-search" placeholder="Search this city's places to add… (click to see all)" autocomplete="off">
-          <div id="route-editor-add-results" class="autocomplete-list hidden"></div>
-        </div>
-        <button type="button" class="btn-small" id="btn-route-advanced-search" style="margin-top:8px;">🔍 Advanced search</button>
 
         <div id="route-editor-error" style="color:var(--red); font-size:.82rem; margin-top:10px; min-height:1em; white-space:pre-line;"></div>
       </div>
@@ -1392,6 +1398,86 @@
     </div>
     <p id="share-error" class="mono hidden" style="margin-top:20px;"></p>
   </main>
+</div>
+
+<!-- ============ AUTO-GENERATE TRIP WIZARD ============ -->
+<!-- Fully automated: places then routes for every trip city, no manual review checklist along the
+     way — see CLAUDE.md "Auto-generate trip wizard" for why that's an intentional trade-off here
+     specifically, and why this needs Tier 3 (no human in the loop for a paste-back step). -->
+<div id="autogen-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="width:1140px; max-width:95vw; max-height:92vh;">
+    <h3>Auto-generate this trip</h3>
+
+    <div id="autogen-step-setup">
+      <p class="hint">Generates places and routes for every city in this trip automatically using
+        AI, and adds them straight to the trip — there's no review checklist along the way, so
+        double-check things afterward (start with "📍 Check coordinates" in the Places tab). This
+        needs Tier 3 (direct AI calls) set up — if that's not working yet, use the regular
+        "✨ Generate with AI" buttons on the Places/Routes tabs instead.</p>
+      <div id="autogen-no-cities-hint" class="hidden" style="background:var(--mustard-soft); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:.85rem;">
+        This trip has no cities set yet — add at least one in "Edit trip details" first.
+      </div>
+      <p class="hint">Cities: <strong id="autogen-cities-list"></strong></p>
+      <div class="modal-grid">
+        <div>
+          <label for="autogen-places-count">Places per city</label>
+          <input id="autogen-places-count" type="number" min="1" max="30" value="10">
+        </div>
+        <div>
+          <label for="autogen-routes-count">Routes per city (0 = places only)</label>
+          <input id="autogen-routes-count" type="number" min="0" max="10" value="3">
+        </div>
+        <div>
+          <label for="autogen-stops-per-route">Places per route (optional)</label>
+          <input id="autogen-stops-per-route" type="number" min="1" placeholder="e.g. 5">
+        </div>
+      </div>
+      <label for="autogen-places-notes">Additional instructions for places (optional)</label>
+      <textarea id="autogen-places-notes" placeholder="e.g. prioritize free/cheap activities, avoid anything touristy"></textarea>
+      <label style="margin-top:10px; display:block;">Route generation method</label>
+      <div class="cat-picker" id="autogen-route-method" style="margin-bottom:6px;">
+        <button type="button" class="cat-chip active" data-method="algo">🧮 Algorithm (fast, free, no AI)</button>
+        <button type="button" class="cat-chip" data-method="ai">✨ AI</button>
+      </div>
+      <div id="autogen-routes-notes-field" class="hidden">
+        <label for="autogen-routes-notes">Additional instructions for routes (optional)</label>
+        <textarea id="autogen-routes-notes" placeholder="e.g. keep mornings light, group museums together, avoid too much backtracking"></textarea>
+      </div>
+      <!-- Real clearance, not just a margin — .modal-actions is position:sticky and, even when this
+           step's content doesn't actually overflow the modal, its sticky-bottom positioning can land
+           a few px into whatever's directly above it if that content ends right at the box's natural
+           height (this is what the user saw as "the bottom bar is overlapping the route generation
+           method options"). A block-level spacer guarantees real layout height between them instead
+           of relying on margin collapsing, which sticky positioning doesn't reliably respect here. -->
+      <div style="height:28px;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="autogen-cancel-1">Cancel</button>
+        <button class="btn-save" id="autogen-start">Start</button>
+      </div>
+    </div>
+
+    <div id="autogen-step-progress" class="hidden">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px;">
+        <p class="hint" id="autogen-status" style="margin:0;"></p>
+        <label style="white-space:nowrap; font-size:.85rem; display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" id="autogen-animate-toggle"> ✨ Animate
+        </label>
+      </div>
+      <progress id="autogen-progress-bar" value="0" max="100"></progress>
+      <div style="display:flex; gap:16px; align-items:flex-start;">
+        <div id="autogen-list-pane" style="flex:1; min-width:0; max-height:60vh; overflow-y:auto;">
+          <div id="autogen-list"></div>
+        </div>
+        <div id="autogen-map-pane" style="flex:1; min-width:0; position:sticky; top:16px;">
+          <div class="route-map-container" id="autogen-map"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="autogen-stop">Stop</button>
+        <button class="btn-save hidden" id="autogen-done">Done</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ============ FIREBASE SDK ============ -->
@@ -1882,6 +1968,7 @@ document.getElementById('btn-new-trip').addEventListener('click', ()=>openEditTr
 document.getElementById('btn-new-trip-empty').addEventListener('click', ()=>openEditTripModal('new'));
 document.getElementById('btn-edit-trip').addEventListener('click', ()=>openEditTripModal('edit'));
 document.getElementById('btn-copy-trip').addEventListener('click', ()=>openEditTripModal('copy'));
+document.getElementById('btn-autogen-trip').addEventListener('click', openAutogenModal);
 document.getElementById('et-cancel').addEventListener('click', ()=>document.getElementById('edit-trip-modal').classList.add('hidden'));
 document.getElementById('edit-trip-modal').addEventListener('click', e=>{
   if(e.target.id === 'edit-trip-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)){
@@ -1993,7 +2080,10 @@ async function saveTripDetails(){
     await db.collection('tripData').doc(slug).set({ meta, places, routes: copiedRoutes, days: [], events: [], expenses: [] });
     await db.collection('tripNotes').doc(slug).set({ places: {}, routeStops: {}, documents: {} });
     document.getElementById('edit-trip-modal').classList.add('hidden');
-    loadTrip(slug);
+    await loadTrip(slug);
+    // Only for a genuinely brand-new trip — "Copy this trip" already seeds places/routes of its own,
+    // offering to auto-generate more on top of that isn't the same "get me started" moment.
+    if(tripModalMode === 'new' && cities.length) openAutogenModal();
     return;
   }
 
@@ -2407,8 +2497,7 @@ function shareRouteHtml(route, base, hasReviews){
     const key = routeStopKey(route.id, si);
     const done = !!tripNotes.routeStops?.[key]?.done;
     const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
-    const gapStr = si < places.length-1 ? formatInterstopGap(interstops[si], true) : '';
-    const legLine = gapStr ? `<div class="place-meta" style="margin:4px 0 8px 14px;">↓ ${gapStr}</div>` : '';
+    const legLine = si < places.length-1 ? interstopGapLinesHtml(interstops[si], true, { style:'margin:4px 0 8px 14px;' }) : '';
     return `<div style="margin-bottom:10px;">
       <div class="place-meta">${si+1}. ${done ? '✓ ' : ''}${stopRatingSummaryHtml(key)}</div>
       ${placeDetailHtml(p, { routeNote: s.note })}
@@ -4654,7 +4743,7 @@ function generateRoutesByAlgorithm(city, opts){
     const stopPlaces = base?.coords ? [base, ...order, base] : order;
     const stops = stopPlaces.map(p=>({ type:'place', placeId: p.id, note:'', stayDuration: null }));
     const interstops = [];
-    for(let g=0; g<stops.length-1; g++) interstops.push({ items: [] });
+    for(let g=0; g<stops.length-1; g++) interstops.push({ options: [] });
     const totalWantRating = order.reduce((sum,p)=>sum+(p.wantRating||0), 0);
 
     return {
@@ -4721,10 +4810,12 @@ document.getElementById('routes-direct-call').addEventListener('click', ()=>{
   });
 });
 
-function validateRoutesResponse(){
-  const errEl = document.getElementById('routes-error');
-  errEl.textContent = '';
-  const city = document.getElementById('routes-city').value;
+// DOM-independent core, extracted so both the Routes modal (validateRoutesResponse() below, which
+// reads #routes-city/#routes-response) and the auto-generate wizard (which has its own city/text
+// without either of those inputs existing) share one definition of "what a valid route object
+// looks like" — throws a single combined Error rather than the errEl-writing/null-returning
+// convention the DOM wrapper uses, since a plain function has no error element to write into.
+function parseRoutesJson(text, city){
   const eligible = getEligiblePlacesForRoutes(city);
   const base = findBasePlace();
   // The base is a valid placeId reference too now that the instruction requires the AI to
@@ -4736,14 +4827,12 @@ function validateRoutesResponse(){
 
   let parsed;
   try{
-    parsed = JSON.parse(document.getElementById('routes-response').value);
+    parsed = JSON.parse(text);
   }catch(err){
-    errEl.textContent = 'Could not parse as JSON: ' + err.message;
-    return null;
+    throw new Error('Could not parse as JSON: ' + err.message);
   }
   if(!Array.isArray(parsed)){
-    errEl.textContent = 'Expected a JSON array of route objects at the top level.';
-    return null;
+    throw new Error('Expected a JSON array of route objects at the top level.');
   }
 
   const errors = [];
@@ -4779,14 +4868,20 @@ function validateRoutesResponse(){
 
     // interstops is validated leniently — a missing/malformed gap just becomes an empty array
     // rather than rejecting an otherwise-valid route over missing travel notes; the AI supplying
-    // fewer gaps than stops.length-1, or the wrong shape, shouldn't block the whole import. Each
-    // gap is wrapped as { items: [...] } — Firestore rejects an array nested directly inside
-    // another array, and interstops is itself an array (see unwrapInterstopGap() above).
+    // fewer gaps than stops.length-1, or the wrong shape, shouldn't block the whole import. The
+    // AI-facing contract is unchanged (still a flat array of steps per gap — see
+    // routesTravelSchemaDoc()); this app now supports several alternative options per gap (see the
+    // options-model comment near wrapGapOptions()), but generating more than one is a manual-editing
+    // feature, not something asked of the AI, so a generated gap's steps become that gap's one
+    // (unnamed) option here — same "migrate existing data into the first option" treatment a
+    // pre-multi-option saved route already gets via wrapGapOptions(). Each gap is wrapped as
+    // { options: [...] } — Firestore rejects an array nested directly inside another array, and
+    // interstops is itself an array (see wrapGapOptions() above).
     const gapCount = Math.max(stops.length - 1, 0);
     const interstops = [];
     for(let g=0; g<gapCount; g++){
       const rawGap = Array.isArray(item.interstops) && Array.isArray(item.interstops[g]) ? item.interstops[g] : [];
-      interstops.push({ items: rawGap.filter(x=>x && typeof x === 'object').map(x=>{
+      const items = rawGap.filter(x=>x && typeof x === 'object').map(x=>{
         const type = typeof x.type === 'string' && x.type.trim() ? x.type.trim() : 'break';
         const isBreak = type === 'break';
         return {
@@ -4796,7 +4891,8 @@ function validateRoutesResponse(){
           cost: isBreak ? null : toNumOrNull(x.cost),
           note: typeof x.note === 'string' ? x.note : ''
         };
-      }) });
+      });
+      interstops.push({ options: wrapItemsAsOption(items) });
     }
 
     const totalWantRating = stops.reduce((sum, s)=>sum + (eligibleById.get(s.placeId)?.wantRating || 0), 0);
@@ -4806,14 +4902,27 @@ function validateRoutesResponse(){
     });
   });
   if(errors.length){
-    errEl.textContent = `Found ${errors.length} problem(s):\n` + errors.join('\n');
-    return null;
+    throw new Error(`Found ${errors.length} problem(s):\n` + errors.join('\n'));
   }
   if(!routes.length){
-    errEl.textContent = 'No routes found in the response.';
-    return null;
+    throw new Error('No routes found in the response.');
   }
   return routes;
+}
+
+// Thin DOM-reading wrapper around parseRoutesJson() above — reads the Routes modal's own city/
+// response fields, reports a failure into #routes-error (the null-return convention every other
+// step-screen validator in this modal already follows) instead of letting the error propagate.
+function validateRoutesResponse(){
+  const errEl = document.getElementById('routes-error');
+  errEl.textContent = '';
+  const city = document.getElementById('routes-city').value;
+  try{
+    return parseRoutesJson(document.getElementById('routes-response').value, city);
+  }catch(err){
+    errEl.textContent = err.message;
+    return null;
+  }
 }
 
 let routesPreviewList = [];
@@ -4900,26 +5009,47 @@ function legToInterstopItem(leg){
   };
 }
 // Firestore rejects arrays nested directly inside arrays ("Nested arrays are not supported") — a
-// gap's items therefore can't be stored as interstops[i] = [...] directly. Each gap is instead
-// stored as an object wrapper, interstops[i] = { items: [...] }, which is just a map value and not
-// subject to that restriction. Accepts a bare array too (defensive — in case anything ever
-// constructs the unwrapped shape in memory without going through a save) so this is the one place
-// that has to know about the wrapper; everything else works with plain arrays.
-function unwrapInterstopGap(gap){
-  if(Array.isArray(gap)) return gap;
-  if(gap && Array.isArray(gap.items)) return gap.items;
+// gap's data therefore can't be stored as interstops[i] = [...] directly. Each gap is instead
+// stored as an object wrapper, interstops[i] = { options: [...] }, which is just a map value and
+// not subject to that restriction.
+//
+// A gap can hold more than one alternative way to get between its two stops (e.g. "metro then a
+// short walk" vs. "one direct bus") — each alternative is an OPTION: { name, items }, where items
+// is the same step list ({type,time,distance,cost,note}) a gap used to hold directly. There's
+// deliberately no "primary"/"selected" option — every option is shown wherever a gap is displayed,
+// and route-level totals are shown as a min–max range across whichever options have numbers
+// entered (see computeGapRange()/computeRouteTotalTime()) rather than picking one to trust.
+//
+// wrapGapOptions() turns any of the shapes a gap has been stored in, across this feature's history,
+// into a uniform options array:
+//   - newest:  { options: [ {name, items}, ... ] }
+//   - post-unification, pre-multi-option: { items: [...] } — one implicit unnamed option
+//   - defensive: a bare array (in case anything ever constructs the unwrapped shape in memory
+//     without going through a save) — same treatment as the items-shape above
+// This is the one place that has to know about all of that; everything else works with a plain
+// options array. Old data displays correctly with no migration step — a route only "upgrades" to
+// the newest shape once someone actually edits and saves it.
+function wrapItemsAsOption(items){
+  return (items && items.length) ? [{ name: '', items }] : [];
+}
+function wrapGapOptions(gap){
+  if(gap && Array.isArray(gap.options)){
+    return gap.options.map(opt => ({ name: opt?.name || '', items: Array.isArray(opt?.items) ? opt.items : [] }));
+  }
+  if(Array.isArray(gap)) return wrapItemsAsOption(gap);
+  if(gap && Array.isArray(gap.items)) return wrapItemsAsOption(gap.items);
   return [];
 }
 function normalizeRoute(route){
   if(Array.isArray(route.interstops)){
-    return { places: route.stops || [], interstops: route.interstops.map(unwrapInterstopGap) };
+    return { places: route.stops || [], interstops: route.interstops.map(wrapGapOptions) };
   }
   const places = [];
   const interstops = [];
   let bucket = null;
   (route.stops || []).forEach(s=>{
     if(stopType(s) === 'place'){
-      if(places.length) interstops.push(bucket || []);
+      if(places.length) interstops.push(wrapItemsAsOption(bucket || []));
       places.push({ type:'place', placeId: s.placeId, note: s.note||'', stayDuration: s.stayDuration ?? null });
       bucket = [];
       (s.travel||[]).forEach(leg => bucket.push(legToInterstopItem(leg)));
@@ -4966,6 +5096,17 @@ function formatMinutes(m){
   if(m >= 60){ const h = Math.floor(m/60), rem = m % 60; return rem ? `${h}h ${rem}m` : `${h}h`; }
   return `${m} min`;
 }
+// Route-level total time (computeRouteTotalTime()) can be a {min,max} range when a gap has more
+// than one option with different totals. Under an hour, show one shared "min" suffix ("13–15 min")
+// same style as formatTimeRange(); at an hour or more, formatMinutes()'s own hour-aware format
+// already reads fine repeated ("2h 15m–2h 30m"), so it's left as two full strings there instead of
+// trying to merge units across an "h"/"m" boundary.
+function formatMinutesRange(min, max){
+  if(min == null) return '';
+  if(min === max) return formatMinutes(min);
+  if(max < 60) return `${min}–${max} min`;
+  return `${formatMinutes(min)}–${formatMinutes(max)}`;
+}
 
 // One interstop item, formatted — break shows a coffee icon + hour-aware duration, a travel-type
 // item shows its type/distance/time/cost. includeNote controls whether the free-text note is
@@ -4978,12 +5119,84 @@ function formatInterstopItem(item, includeNote){
   if(includeNote && item.note) parts.push(item.note);
   return parts.filter(Boolean).join(' · ');
 }
-// A gap can hold zero or more interstop items (empty = "right next to each other, no travel note
-// needed"). Joined with " · then · " for contexts that want a single inline string (the expanded
-// route view's "↓ leg" line); routeStopSequenceLine/renderRoutesPreview render each stop's gap as
-// its own line instead, using this same joined string as that line's content.
+// A single option's step list can hold zero or more interstop items (empty = "right next to each
+// other, no travel note needed" for a gap with only this one option). Joined with " · then · " for
+// contexts that want a single inline string per option.
 function formatInterstopGap(items, includeNote){
   return (items||[]).map(it=>formatInterstopItem(it, includeNote)).filter(Boolean).join(' · then · ');
+}
+
+// One option's combined distance/time — a plain sum of whatever numeric values its steps actually
+// have entered, purely for display (never saved — see "Auto-generate"/route editor comments near
+// the options UI). null for a field means nothing in this option had a number for it at all,
+// distinct from 0 (which would misrepresent "no data" as "definitely free/instant").
+function computeOptionTotals(option){
+  let distance = null, time = null;
+  (option?.items || []).forEach(it=>{
+    if(typeof it.distance === 'number') distance = (distance || 0) + it.distance;
+    if(typeof it.time === 'number') time = (time || 0) + it.time;
+  });
+  return { distance, time };
+}
+function formatDistanceRange(min, max){
+  if(min == null) return '';
+  const useKm = max > 500;
+  const fmt = v => useKm ? `${(v/1000).toFixed(1)} km` : `${v} m`;
+  return min === max ? fmt(min) : `${fmt(min)}–${fmt(max)}`;
+}
+function formatTimeRange(min, max){
+  if(min == null) return '';
+  return min === max ? `${min} min` : `${min}–${max} min`;
+}
+// One option's own total, e.g. "2.3 km, 15 min" — no range here, a single option has one number.
+function formatOptionTotals(totals){
+  const parts = [formatDistanceRange(totals.distance, totals.distance), formatTimeRange(totals.time, totals.time)];
+  return parts.filter(Boolean).join(', ');
+}
+// Across every option in a gap, the min–max spread of each option's own combined total — e.g. two
+// options totaling 2.3km/15min and 2.5km/13min give {distanceMin:2300,distanceMax:2500,
+// timeMin:13,timeMax:15}. A field some options never entered a number for is excluded from that
+// field's range rather than treated as 0. null overall when nothing in any option has a number.
+function computeGapRange(options){
+  const totals = (options || []).map(computeOptionTotals);
+  const distances = totals.map(t=>t.distance).filter(d=>d != null);
+  const times = totals.map(t=>t.time).filter(t=>t != null);
+  if(!distances.length && !times.length) return null;
+  return {
+    distanceMin: distances.length ? Math.min(...distances) : null,
+    distanceMax: distances.length ? Math.max(...distances) : null,
+    timeMin: times.length ? Math.min(...times) : null,
+    timeMax: times.length ? Math.max(...times) : null
+  };
+}
+function formatGapRangeSummary(range){
+  if(!range) return '';
+  const parts = [formatDistanceRange(range.distanceMin, range.distanceMax), formatTimeRange(range.timeMin, range.timeMax)];
+  return parts.filter(Boolean).join(', ');
+}
+
+// One option, formatted as a single line: its name (if set) followed by its steps joined the same
+// way formatInterstopGap always has, followed by its own combined total in parentheses. Empty
+// string if the option has no steps that produced any text (nothing to show).
+function formatInterstopOptionLine(option, includeNote){
+  const stepsStr = formatInterstopGap(option?.items, includeNote);
+  if(!stepsStr) return '';
+  const totalsStr = formatOptionTotals(computeOptionTotals(option));
+  const namePart = option.name ? `<strong>${option.name}:</strong> ` : '';
+  return `${namePart}${stepsStr}${totalsStr ? ` <span class="place-meta" style="font-weight:600;">(${totalsStr})</span>` : ''}`;
+}
+// A gap's full display: every option gets its own line (no "primary" option — see the options-model
+// comment near wrapGapOptions() above) wrapped in the caller's chosen tag/class, each prefixed the
+// same way a single-line gap always was ("↓ "). Empty string if the gap has no options with any
+// steps at all, same as the old single-line helper being empty for a travel-free gap.
+function interstopGapLinesHtml(options, includeNote, opts){
+  opts = opts || {};
+  const tag = opts.tag || 'div';
+  const cls = opts.className || 'place-meta route-gap-line';
+  const style = opts.style ? ` style="${opts.style}"` : '';
+  const prefix = opts.prefix ?? '↓ ';
+  const lines = (options || []).map(o=>formatInterstopOptionLine(o, includeNote)).filter(Boolean);
+  return lines.map(l => `<${tag} class="${cls}"${style}>${prefix}${l}</${tag}>`).join('');
 }
 
 // Compact place thumbnail for route stop rows — same thumbnailLinkOf() lookup renderPlaces() uses,
@@ -5002,17 +5215,20 @@ function routeStopThumbHtml(place, sizeClass){
 
 // Sums whatever numeric stay durations and interstop times are actually entered — gaps or stops
 // left blank just don't contribute, so this is a lower bound, not a guaranteed-complete total, but
-// it's the best available without a real routing API.
+// it's the best available without a real routing API. Returns a {min,max} range rather than a
+// single number: a gap with more than one option can genuinely have different totals depending on
+// which one gets taken (computeGapRange()), so the route-level total reflects that same uncertainty
+// — min===max is the common case (every gap has at most one usable option), formatted without a
+// dash by the caller.
 function computeRouteTotalTime(r){
   const { places, interstops } = normalizeRoute(r);
-  let total = 0, hasAny = false;
+  let min = 0, max = 0, hasAny = false;
   places.forEach((s,si)=>{
-    if(typeof s.stayDuration === 'number'){ total += s.stayDuration; hasAny = true; }
-    (interstops[si]||[]).forEach(item=>{
-      if(typeof item.time === 'number'){ total += item.time; hasAny = true; }
-    });
+    if(typeof s.stayDuration === 'number'){ min += s.stayDuration; max += s.stayDuration; hasAny = true; }
+    const range = computeGapRange(interstops[si] || []);
+    if(range && range.timeMin != null){ min += range.timeMin; max += range.timeMax; hasAny = true; }
   });
-  return hasAny ? total : null;
+  return hasAny ? { min, max } : null;
 }
 
 // Newer routes (AI-generated or manual) include the base literally as the first/last stop; older
@@ -5036,8 +5252,7 @@ function routeStopSequenceLine(r, base, sizeClass){
     const name = p ? `<a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">${p.name}</a>` : (s.placeId || '(unknown place)');
     const stayStr = formatMinutes(s.stayDuration);
     const baseLabel = isBaseStop(s, base) ? (si===0 ? 'Start: ' : si===places.length-1 ? 'End: ' : '') : '';
-    const gapStr = si < places.length-1 ? formatInterstopGap(interstops[si], false) : '';
-    const gapLine = gapStr ? `<div class="place-meta route-gap-line">↓ ${gapStr}</div>` : '';
+    const gapLine = si < places.length-1 ? interstopGapLinesHtml(interstops[si], false) : '';
     return `<div class="route-stop-line">${thumb}<div class="place-meta">${si+1}. ${baseLabel}${name}${stayStr ? ` (${stayStr})` : ''}</div></div>${gapLine}`;
   }).join('');
   const startLine = (base && !firstIsBase) ? `<div class="place-meta">Start: ${base.name}</div>` : '';
@@ -5053,8 +5268,7 @@ function renderExpandedRouteHtml(r){
   const base = findBasePlace();
   const { places, interstops } = normalizeRoute(r);
   const rows = places.map((s,si)=>{
-    const gapStr = si < places.length-1 ? formatInterstopGap(interstops[si], true) : '';
-    const legLine = gapStr ? `<div class="place-meta" style="margin:4px 0 8px 14px;">↓ ${gapStr}</div>` : '';
+    const legLine = si < places.length-1 ? interstopGapLinesHtml(interstops[si], true, { style:'margin:4px 0 8px 14px;' }) : '';
     const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
     const clickable = p && p.coords;
     // Categories + the place's own description surface here specifically (not just the compact
@@ -5180,7 +5394,8 @@ function renderRoutes(){
       const provenance = r.generatedBy === 'manual' ? '✎ Manual' : r.generatedBy === 'algorithm' ? '🧮 Algorithm' : '✨ AI-generated';
       const expanded = expandedRouteIdx === i;
       const totalTime = computeRouteTotalTime(r);
-      const totalTimeLine = totalTime != null ? `<p class="place-meta">Total time: ~${formatMinutes(totalTime)}</p>` : '';
+      const totalTimeStr = totalTime != null ? formatMinutesRange(totalTime.min, totalTime.max) : null;
+      const totalTimeLine = totalTimeStr != null ? `<p class="place-meta">Total time: ~${totalTimeStr}</p>` : '';
       // Expanding replaces the compact stop-sequence summary with the full list+map, like an
       // accordion, rather than showing both stacked on top of each other.
       const body = expanded
@@ -5295,7 +5510,7 @@ function defaultOrsLegType(){
   return 'walk';
 }
 
-// Operates on the route editor's in-memory {places, interstops} state (bare-array gap shape, same
+// Operates on the route editor's in-memory {places, interstops} state (options-per-gap shape, same
 // as normalizeRoute() returns — see the "Manual route editor" comment below) and mutates it in
 // place. Nothing is written to Firestore here — same "nothing saves until Save" rule as every other
 // editor action, so a bad calculation is trivially discardable by just closing the editor. Returns
@@ -5309,20 +5524,28 @@ async function calculateRouteTravel(places, interstops){
   const resolved = places.map(s => (tripData.places||[]).find(pl=>pl.id===s.placeId)).map((p,i)=>({ p, stop: places[i] }));
   const missingCoords = resolved.filter(r=>!r.p?.coords).length;
 
-  // Which gaps need calculating, and with which profile — an existing item whose type already
-  // maps to a profile gets recalculated onto that same item; a genuinely empty gap gets one new
-  // item created using defaultOrsLegType(). A gap whose only item(s) are "break" or a
-  // non-ORS-mappable type (metro/bus/train/ferry/custom) is left alone entirely.
-  const gapPlans = []; // { gapIdx, profile, itemIdx (existing) | null (new item to create) }
-  interstops.forEach((items, g)=>{
+  // Which gaps need calculating, and with which profile. A gap with no options at all — or options
+  // that exist but hold zero items between them — gets one new option+item created using
+  // defaultOrsLegType(). Otherwise every option in the gap is checked independently (there's no
+  // "primary" option to single out — see the options-model comment near wrapGapOptions()): each
+  // option's own first item whose type already maps to a profile gets recalculated onto that same
+  // item; an option with only break/transit/custom items has nothing to calculate and is left
+  // alone. Multiple options in one gap needing the same profile still cost only one Matrix call
+  // (profilesNeeded below dedupes by profile, not by option) since it's the same physical leg.
+  const gapPlans = []; // { gapIdx, optIdx, profile, itemIdx (existing) | null (new item to create) }
+  interstops.forEach((options, g)=>{
     if(!resolved[g]?.p?.coords || !resolved[g+1]?.p?.coords) return; // can't route without both endpoints
-    if(!items.length){
-      gapPlans.push({ gapIdx: g, profile: ORS_PROFILE_BY_TYPE[defaultOrsLegType()], itemIdx: null, newType: defaultOrsLegType() });
+    const opts = options || [];
+    const totalItems = opts.reduce((n,o)=>n + (o.items?.length || 0), 0);
+    if(!totalItems){
+      gapPlans.push({ gapIdx: g, optIdx: 0, profile: ORS_PROFILE_BY_TYPE[defaultOrsLegType()], itemIdx: null, newType: defaultOrsLegType(), createOption: opts.length === 0 });
       return;
     }
-    const itemIdx = items.findIndex(it => ORS_PROFILE_BY_TYPE[it.type]);
-    if(itemIdx === -1) return; // every item here is a break/transit/custom type — nothing to calculate
-    gapPlans.push({ gapIdx: g, profile: ORS_PROFILE_BY_TYPE[items[itemIdx].type], itemIdx });
+    opts.forEach((opt, oi)=>{
+      const itemIdx = (opt.items || []).findIndex(it => ORS_PROFILE_BY_TYPE[it.type]);
+      if(itemIdx === -1) return; // this option is break/transit/custom-only — nothing to calculate
+      gapPlans.push({ gapIdx: g, optIdx: oi, profile: ORS_PROFILE_BY_TYPE[opt.items[itemIdx].type], itemIdx });
+    });
   });
 
   if(!gapPlans.length){
@@ -5340,20 +5563,22 @@ async function calculateRouteTravel(places, interstops){
   }
 
   let updated = 0;
-  gapPlans.forEach(({gapIdx, profile, itemIdx, newType})=>{
+  gapPlans.forEach(({gapIdx, optIdx, profile, itemIdx, newType, createOption})=>{
     const fromId = resolved[gapIdx].p.id, toId = resolved[gapIdx+1].p.id;
     const val = lookupsByProfile[profile].get(orsCacheKey(fromId, toId, profile));
     if(!val) return; // ORS didn't return this pair (e.g. unroutable) — leave it untouched
     if(itemIdx === null){
-      interstops[gapIdx].push({ type: newType, time: val.durationMin, distance: val.distanceM, cost: null, note: '' });
+      if(createOption) interstops[gapIdx] = [{ name: '', items: [] }];
+      interstops[gapIdx][optIdx].items.push({ type: newType, time: val.durationMin, distance: val.distanceM, cost: null, note: '' });
     }else{
-      interstops[gapIdx][itemIdx].time = val.durationMin;
-      interstops[gapIdx][itemIdx].distance = val.distanceM;
+      interstops[gapIdx][optIdx].items[itemIdx].time = val.durationMin;
+      interstops[gapIdx][optIdx].items[itemIdx].distance = val.distanceM;
     }
     updated++;
   });
 
-  return { updated, skipped: interstops.length - gapPlans.length, missingCoords };
+  const distinctPlannedGaps = new Set(gapPlans.map(p=>p.gapIdx)).size;
+  return { updated, skipped: interstops.length - distinctPlannedGaps, missingCoords };
 }
 
 document.getElementById('btn-route-calc-travel').addEventListener('click', async ()=>{
@@ -5428,8 +5653,6 @@ function openRouteEditor(idx, mode){
   document.getElementById('route-editor-error').textContent = '';
   document.getElementById('route-calc-status').textContent = '';
   document.getElementById('route-editor-label').value = existing?.label || '';
-  document.getElementById('route-editor-add-search').value = '';
-  document.getElementById('route-editor-add-results').classList.add('hidden');
 
   const citySel = document.getElementById('route-editor-city');
   const cities = tripData?.meta?.cities || [];
@@ -5481,6 +5704,7 @@ function renderRouteEditorMap(){
     });
     const marker = L.marker([p.coords.lat, p.coords.lng], { icon }).addTo(routeEditorMap);
     marker.bindPopup(`<b>${markerNum}. ${p.name}</b>`);
+    marker.on('click', ()=>focusRouteEditorListOnStop(si));
     markersByStopIdx[si] = marker;
     points.push([p.coords.lat, p.coords.lng]);
   });
@@ -5495,10 +5719,46 @@ function renderRouteEditorMap(){
   }, 50);
 }
 
+// Bidirectional list<->map focus, same pattern the expanded route view already has
+// (focusRouteMapOnStop()/focusRouteListOnStop()) but scoped to the editor's own map/markers/list.
+function focusRouteEditorMapOnStop(si){
+  const marker = routeEditorMarkersByStopIdx[si];
+  if(!marker || !routeEditorMap) return;
+  routeEditorMap.invalidateSize();
+  routeEditorMap.setView(marker.getLatLng(), Math.max(routeEditorMap.getZoom(), 14));
+  marker.openPopup();
+}
+function focusRouteEditorListOnStop(si){
+  const row = document.querySelector(`#route-editor-stops .route-stop-row[data-stop-idx="${si}"]`);
+  if(!row) return;
+  row.scrollIntoView({behavior:'smooth', block:'center'});
+  document.querySelectorAll('#route-editor-stops .route-stop-row.highlighted').forEach(r=>r.classList.remove('highlighted'));
+  row.classList.add('highlighted');
+  setTimeout(()=>row.classList.remove('highlighted'), 2500);
+}
+
+// The search-to-add box used to live once, fixed below the whole stop list, always inserting at
+// the end — there was no way to add a place between two existing stops short of adding it at the
+// end and dragging it up with ↑. Revised so this same combined search+advanced-search control
+// renders after EVERY stop (insertAt = i+1 for stop i), so "insert between stop 2 and 3" is just
+// using the widget that already sits right there — no extra buttons, no dropdown of positions.
+function routeInsertWidgetHtml(insertAt){
+  return `<div style="margin:6px 0 10px 20px;">
+    <label style="display:block; margin:0 0 6px; font-size:.72rem; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft);">+ Add a place here</label>
+    <div style="display:flex; gap:8px; align-items:flex-start;">
+      <div style="flex:1; min-width:0; position:relative;">
+        <input type="text" class="route-insert-search" data-insert-at="${insertAt}" placeholder="Search this city's places… (click to see all)" autocomplete="off">
+        <div class="route-insert-results autocomplete-list hidden" data-insert-at="${insertAt}"></div>
+      </div>
+      <button type="button" class="btn-small route-insert-advanced" data-insert-at="${insertAt}">🔍 Advanced</button>
+    </div>
+  </div>`;
+}
+
 function renderRouteEditorStops(){
   const el = document.getElementById('route-editor-stops');
   if(!routeEditorPlaces.length){
-    el.innerHTML = '<p class="mono">No stops yet — search below to add a place.</p>';
+    el.innerHTML = '<p class="mono">No stops yet.</p>' + routeInsertWidgetHtml(0);
     renderRouteEditorMap();
     return;
   }
@@ -5507,12 +5767,23 @@ function renderRouteEditorStops(){
     const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
     const name = p?.name || s.placeId || '(unknown place)';
     const thumb = routeStopThumbHtml(p);
+    // Same links a place shows anywhere else (placeDetailHtml()'s own links row) — Map ↗, every
+    // non-thumbnail links[] entry, and any related documents — so they're openable without leaving
+    // the editor instead of having to look the place up elsewhere first.
+    const linksHtml = p ? `<div style="margin-top:6px;">
+      <a class="place-link" href="${mapLink((p.name||'')+' '+(p.city||''))}" target="_blank">Map ↗</a>${(p.links||[]).filter(l=>!isThumbnailLabel(l.label)).map(l=>`<a class="place-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join('')}${relatedDocLinksHtml(p.id)}
+    </div>` : '';
     const controls = `<div style="display:flex; gap:6px;">
       <button type="button" class="btn-small route-stop-up" data-idx="${i}" ${i===0?'disabled':''}>↑</button>
       <button type="button" class="btn-small route-stop-down" data-idx="${i}" ${i===routeEditorPlaces.length-1?'disabled':''}>↓</button>
       <button type="button" class="btn-small route-stop-remove" data-idx="${i}">Remove</button>
     </div>`;
-    const placeCard = `<div class="card" style="margin-bottom:10px;">
+    // Clicking the card (not a button/link/input within it) pans the editor's own map to this
+    // stop's marker, same bidirectional list<->map focus every other split list+map view in the
+    // app already has (Places tab, expanded route view, Day-by-day) — this editor's map just never
+    // had it wired up.
+    const clickable = p && p.coords;
+    const placeCard = `<div class="card route-stop-row${clickable ? ' js-route-editor-stop-click' : ''}" data-stop-idx="${i}" style="margin-bottom:10px; ${clickable ? 'cursor:pointer;' : ''}">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
         <div style="display:flex; align-items:center; gap:10px; min-width:0;">
           ${thumb}
@@ -5520,6 +5791,7 @@ function renderRouteEditorStops(){
         </div>
         ${controls}
       </div>
+      ${linksHtml}
       <div class="modal-grid" style="margin-top:8px;">
         <div>
           <label>Note for this stop</label>
@@ -5534,50 +5806,73 @@ function renderRouteEditorStops(){
 
     let gapHtml = '';
     if(i < routeEditorPlaces.length - 1){
-      const items = routeEditorInterstops[i] || [];
-      const itemRows = items.map((item, j)=>{
-        const isBreak = item.type === 'break';
-        const isCustomType = !isBreak && item.type && !TRAVEL_LEG_TYPES.includes(item.type);
-        return `<div class="card" style="margin:8px 0 8px 20px; border-color:var(--mustard);">
+      // A gap that's currently empty gets silently backfilled from whatever was last manually
+      // entered between these exact two places (any route, any trip session) — see the interstop
+      // cache comment near saveInterstopCache() below. Idempotent: once filled, later renders find
+      // it non-empty and skip straight past this.
+      maybeRestoreGapFromCache(i);
+      const options = routeEditorInterstops[i] || [];
+      const mapsLink = buildGapDirectionsLink(i);
+      const rangeStr = options.length > 1 ? formatGapRangeSummary(computeGapRange(options)) : '';
+
+      const optionCards = options.map((opt, oi)=>{
+        const totalsStr = formatOptionTotals(computeOptionTotals(opt));
+        const itemRows = (opt.items||[]).map((item, j)=>{
+          const isBreak = item.type === 'break';
+          const isCustomType = !isBreak && item.type && !TRAVEL_LEG_TYPES.includes(item.type);
+          return `<div class="card" style="margin:8px 0 8px 16px; border-color:var(--mustard);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+              <label style="margin:0;">Type</label>
+              <button type="button" class="btn-small route-interstop-remove" data-gap="${i}" data-option="${oi}" data-item="${j}">Remove step</button>
+            </div>
+            <select class="route-interstop-type-select" data-gap="${i}" data-option="${oi}" data-item="${j}">
+              <option value="break" ${isBreak?'selected':''}>Break</option>
+              ${TRAVEL_LEG_TYPES.map(t=>`<option value="${t}" ${item.type===t?'selected':''}>${formatCat(t)}</option>`).join('')}
+              <option value="__custom__" ${isCustomType?'selected':''}>Custom…</option>
+            </select>
+            <input type="text" class="route-interstop-type-custom${isCustomType?'':' hidden'}" data-gap="${i}" data-option="${oi}" data-item="${j}" placeholder="Custom type" value="${isCustomType?item.type:''}" style="margin-top:6px;">
+            <div class="modal-grid interstop-dc-fields${isBreak?' hidden':''}" data-gap="${i}" data-option="${oi}" data-item="${j}" style="margin-top:8px;">
+              <div>
+                <label>Distance (meters)</label>
+                <input type="number" min="0" class="route-interstop-distance" data-gap="${i}" data-option="${oi}" data-item="${j}" placeholder="e.g. 600" value="${typeof item.distance==='number'?item.distance:''}">
+              </div>
+              <div>
+                <label>Cost${currency?` (${currency})`:' (no currency set for this trip)'}</label>
+                <input type="number" min="0" step="0.01" class="route-interstop-cost" data-gap="${i}" data-option="${oi}" data-item="${j}" placeholder="e.g. 24" value="${typeof item.cost==='number'?item.cost:''}">
+              </div>
+            </div>
+            <div class="modal-grid" style="margin-top:8px;">
+              <div>
+                <label>Time (minutes)</label>
+                <input type="number" min="0" class="route-interstop-time" data-gap="${i}" data-option="${oi}" data-item="${j}" placeholder="e.g. 8" value="${typeof item.time==='number'?item.time:''}">
+              </div>
+              <div>
+                <label>Note</label>
+                <input type="text" class="route-interstop-note" data-gap="${i}" data-option="${oi}" data-item="${j}" placeholder="Optional" value="${item.note||''}">
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div class="card" style="margin:8px 0 8px 20px; border-color:var(--harbor);">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-            <label style="margin:0;">Type</label>
-            <button type="button" class="btn-small route-interstop-remove" data-gap="${i}" data-item="${j}">Remove</button>
+            <input type="text" class="route-interstop-option-name" data-gap="${i}" data-option="${oi}" placeholder="Name this way (optional) — e.g. Metro + walk" value="${opt.name||''}" style="flex:1; font-weight:600; border:none; background:transparent; padding:4px 0;">
+            <button type="button" class="btn-small route-interstop-option-remove" data-gap="${i}" data-option="${oi}">Remove option</button>
           </div>
-          <select class="route-interstop-type-select" data-gap="${i}" data-item="${j}">
-            <option value="break" ${isBreak?'selected':''}>Break</option>
-            ${TRAVEL_LEG_TYPES.map(t=>`<option value="${t}" ${item.type===t?'selected':''}>${formatCat(t)}</option>`).join('')}
-            <option value="__custom__" ${isCustomType?'selected':''}>Custom…</option>
-          </select>
-          <input type="text" class="route-interstop-type-custom${isCustomType?'':' hidden'}" data-gap="${i}" data-item="${j}" placeholder="Custom type" value="${isCustomType?item.type:''}" style="margin-top:6px;">
-          <div class="modal-grid interstop-dc-fields${isBreak?' hidden':''}" data-gap="${i}" data-item="${j}" style="margin-top:8px;">
-            <div>
-              <label>Distance (meters)</label>
-              <input type="number" min="0" class="route-interstop-distance" data-gap="${i}" data-item="${j}" placeholder="e.g. 600" value="${typeof item.distance==='number'?item.distance:''}">
-            </div>
-            <div>
-              <label>Cost${currency?` (${currency})`:' (no currency set for this trip)'}</label>
-              <input type="number" min="0" step="0.01" class="route-interstop-cost" data-gap="${i}" data-item="${j}" placeholder="e.g. 24" value="${typeof item.cost==='number'?item.cost:''}">
-            </div>
-          </div>
-          <div class="modal-grid" style="margin-top:8px;">
-            <div>
-              <label>Time (minutes)</label>
-              <input type="number" min="0" class="route-interstop-time" data-gap="${i}" data-item="${j}" placeholder="e.g. 8" value="${typeof item.time==='number'?item.time:''}">
-            </div>
-            <div>
-              <label>Note</label>
-              <input type="text" class="route-interstop-note" data-gap="${i}" data-item="${j}" placeholder="Optional" value="${item.note||''}">
-            </div>
-          </div>
+          ${totalsStr ? `<p class="place-meta route-interstop-option-totals" data-gap="${i}" data-option="${oi}">${totalsStr}</p>` : `<p class="place-meta route-interstop-option-totals hidden" data-gap="${i}" data-option="${oi}"></p>`}
+          ${itemRows}
+          <button type="button" class="btn-small route-interstop-add" data-gap="${i}" data-option="${oi}">+ Add step</button>
         </div>`;
       }).join('');
+
       gapHtml = `<div style="margin:6px 0 6px 20px;">
-        ${itemRows}
-        <button type="button" class="btn-small route-interstop-add" data-gap="${i}">+ Add travel or break</button>
+        ${mapsLink ? `<p class="place-meta"><a href="${mapsLink}" target="_blank">🗺️ Get directions in Google Maps ↗</a> <span style="opacity:.7;">(to help fill this in by hand)</span></p>` : ''}
+        <p class="place-meta route-interstop-gap-range" data-gap="${i}" style="font-weight:600; ${rangeStr?'':'display:none;'}">${rangeStr ? `Range across options: ${rangeStr}` : ''}</p>
+        ${optionCards}
+        <button type="button" class="btn-small route-interstop-option-add" data-gap="${i}">+ Add another way (option)</button>
       </div>`;
     }
 
-    return placeCard + gapHtml;
+    return placeCard + gapHtml + routeInsertWidgetHtml(i+1);
   }).join('');
   renderRouteEditorMap();
 }
@@ -5585,9 +5880,123 @@ function renderRouteEditorStops(){
 // A gap's interstop list belongs to the EDGE between two stops, not to either stop itself.
 // Swapping/removing stops changes which edges exist, so data left sitting at an affected gap
 // index would silently describe a leg that no longer exists — cleared rather than guessed at,
-// same reasoning as the old single-travel-leg version of this.
+// same reasoning as the old single-travel-leg version of this. cacheGapBeforeClear() (below) is
+// always called against the OLD places array before a swap/removal, so whatever was manually
+// entered isn't lost — it can come back automatically if the same two places end up adjacent again.
 function clearGapAt(idx){
   if(idx >= 0 && idx < routeEditorInterstops.length) routeEditorInterstops[idx] = [];
+}
+
+// ---------- Manually-entered travel options: remembered per place-pair, not per route ----------
+// Reordering a route's stops (or building a new route between two places used together before)
+// routinely recreates a gap that already had real data entered for it elsewhere — losing that and
+// making someone retype it was the actual complaint this solves. No Firestore involved (kept
+// deliberately simple, a plain browser-local convenience cache, not trip data) — keyed by
+// (tripId, fromPlaceId, toPlaceId), directional the same way orsLegCache is (a real street between
+// two places isn't necessarily symmetric). Scoped to the current trip so switching trips can't leak
+// one trip's manually-entered legs into another's place-id namespace.
+function interstopCacheKey(fromId, toId){
+  return `interstopCache:${currentTripId}:${fromId}>${toId}`;
+}
+function saveInterstopCache(fromId, toId, options){
+  if(!fromId || !toId) return;
+  try{
+    if(!options || !options.length) localStorage.removeItem(interstopCacheKey(fromId, toId));
+    else localStorage.setItem(interstopCacheKey(fromId, toId), JSON.stringify(options));
+  }catch(err){ /* localStorage full/unavailable — this is a convenience cache only, fail silently */ }
+}
+function loadInterstopCache(fromId, toId){
+  if(!fromId || !toId) return null;
+  try{
+    const raw = localStorage.getItem(interstopCacheKey(fromId, toId));
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  }catch(err){ return null; }
+}
+// Called after every edit to a gap's options (add/remove/rename/step edits) so the cache always
+// reflects the latest state — including writing an empty result, which clears a stale cache entry
+// rather than letting a later render silently resurrect data the user just deliberately removed.
+function syncGapCache(gapIdx){
+  const fromP = routeEditorPlaces[gapIdx], toP = routeEditorPlaces[gapIdx+1];
+  if(!fromP?.placeId || !toP?.placeId) return;
+  saveInterstopCache(fromP.placeId, toP.placeId, routeEditorInterstops[gapIdx] || []);
+}
+// Called against the OLD places array right before a reorder/removal would otherwise discard a
+// gap's data via clearGapAt() — snapshots whatever's there now (if anything) so it isn't lost.
+function cacheGapBeforeClear(gapIdx){
+  if(gapIdx < 0 || gapIdx >= routeEditorInterstops.length) return;
+  const opts = routeEditorInterstops[gapIdx];
+  if(!opts || !opts.length) return; // nothing to preserve
+  const fromP = routeEditorPlaces[gapIdx], toP = routeEditorPlaces[gapIdx+1];
+  if(!fromP?.placeId || !toP?.placeId) return;
+  saveInterstopCache(fromP.placeId, toP.placeId, opts);
+}
+// Silently backfills a currently-empty gap from the cache, if these exact two places have a
+// remembered pairing — called from renderRouteEditorStops() right before that gap renders.
+// Idempotent (only fills when empty), so re-rendering after the fill is a no-op here.
+function maybeRestoreGapFromCache(gapIdx){
+  const opts = routeEditorInterstops[gapIdx];
+  if(opts && opts.length) return;
+  const fromP = routeEditorPlaces[gapIdx], toP = routeEditorPlaces[gapIdx+1];
+  if(!fromP?.placeId || !toP?.placeId) return;
+  const cached = loadInterstopCache(fromP.placeId, toP.placeId);
+  if(cached) routeEditorInterstops[gapIdx] = JSON.parse(JSON.stringify(cached));
+}
+
+// Inserts a new place at an arbitrary position (insertAt = index it should land at, 0..length) —
+// not just appended at the end. insertAt always comes from a specific "+ Add a place here" widget
+// (routeInsertWidgetHtml(), rendered after every stop, so insertAt is 0 for the empty-route case or
+// i+1 for "after stop i"), never from user-typed input, so it's trusted as a valid index. Inserting
+// strictly between two existing stops splits the gap that used to connect them into two new empty
+// gaps (their old combined data can't describe either half on its own) — snapshotted to the
+// interstop cache first via cacheGapBeforeClear(), same as reordering/removing a stop already does,
+// so it isn't just lost. Inserting at either end only needs one new empty gap, and inserting into a
+// currently-empty route needs none at all.
+function insertRouteEditorPlace(placeId, insertAt){
+  const n = routeEditorPlaces.length;
+  if(insertAt > 0 && insertAt < n){
+    cacheGapBeforeClear(insertAt - 1);
+    routeEditorInterstops.splice(insertAt - 1, 1, [], []);
+  }else if(insertAt === 0 && n > 0){
+    routeEditorInterstops.splice(0, 0, []);
+  }else if(insertAt === n && n > 0){
+    routeEditorInterstops.push([]);
+  }
+  routeEditorPlaces.splice(insertAt, 0, { type:'place', placeId, note:'', stayDuration: null });
+}
+
+// There's no routing API call here (see CLAUDE.md — ORS gives numbers, not turn-by-turn transit
+// options) — this just plugs both stops' coordinates into Google Maps' own directions URL so the
+// user can open it, see the real walking/transit/driving options Google offers, and copy the
+// numbers into the option/step fields above by hand. Google's directions URL accepts a raw
+// "lat,lng" pair as either endpoint, no place name or API key needed:
+// https://www.google.com/maps/dir/{lat1},{lng1}/{lat2},{lng2}
+function buildGapDirectionsLink(gapIdx){
+  const fromP = (tripData.places||[]).find(pl=>pl.id===routeEditorPlaces[gapIdx]?.placeId);
+  const toP = (tripData.places||[]).find(pl=>pl.id===routeEditorPlaces[gapIdx+1]?.placeId);
+  if(!fromP?.coords || !toP?.coords) return null;
+  return `https://www.google.com/maps/dir/${fromP.coords.lat},${fromP.coords.lng}/${toP.coords.lat},${toP.coords.lng}`;
+}
+
+// Updates just the totals text for one option and its gap's range summary, without a full
+// re-render — called after a distance/time field changes, same "don't lose focus/cursor position
+// on every keystroke" reasoning the input handler below already follows for everything else.
+function updateGapTotalsDisplay(gapIdx){
+  const options = routeEditorInterstops[gapIdx] || [];
+  options.forEach((opt, oi)=>{
+    const el = document.querySelector(`.route-interstop-option-totals[data-gap="${gapIdx}"][data-option="${oi}"]`);
+    if(!el) return;
+    const str = formatOptionTotals(computeOptionTotals(opt));
+    el.textContent = str;
+    el.classList.toggle('hidden', !str);
+  });
+  const rangeEl = document.querySelector(`.route-interstop-gap-range[data-gap="${gapIdx}"]`);
+  if(rangeEl){
+    const str = options.length > 1 ? formatGapRangeSummary(computeGapRange(options)) : '';
+    rangeEl.textContent = str ? `Range across options: ${str}` : '';
+    rangeEl.style.display = str ? '' : 'none';
+  }
 }
 
 document.getElementById('route-editor-stops').addEventListener('click', e=>{
@@ -5595,16 +6004,25 @@ document.getElementById('route-editor-stops').addEventListener('click', e=>{
   const up = e.target.closest('.route-stop-up');
   const down = e.target.closest('.route-stop-down');
   const remove = e.target.closest('.route-stop-remove');
-  const gapAdd = e.target.closest('.route-interstop-add');
-  const gapRemove = e.target.closest('.route-interstop-remove');
+  const optionAdd = e.target.closest('.route-interstop-option-add');
+  const optionRemove = e.target.closest('.route-interstop-option-remove');
+  const stepAdd = e.target.closest('.route-interstop-add');
+  const stepRemove = e.target.closest('.route-interstop-remove');
+  // Checked last (see the if/else chain below) so a click on any button/link/input inside the
+  // card — including the ones already matched above — never also triggers the map focus.
+  const stopRowClick = !e.target.closest('a, button, input') ? e.target.closest('.js-route-editor-stop-click') : null;
 
   if(up){
     const i = Number(up.dataset.idx);
+    // Snapshot against the OLD (pre-swap) places array — clearGapAt() below discards these same
+    // indices, and by the time it runs the places would already be swapped.
+    cacheGapBeforeClear(i-2); cacheGapBeforeClear(i-1); cacheGapBeforeClear(i);
     [routeEditorPlaces[i-1], routeEditorPlaces[i]] = [routeEditorPlaces[i], routeEditorPlaces[i-1]];
     clearGapAt(i-2); clearGapAt(i-1); clearGapAt(i);
     renderRouteEditorStops();
   }else if(down){
     const i = Number(down.dataset.idx);
+    cacheGapBeforeClear(i-1); cacheGapBeforeClear(i); cacheGapBeforeClear(i+1);
     [routeEditorPlaces[i+1], routeEditorPlaces[i]] = [routeEditorPlaces[i], routeEditorPlaces[i+1]];
     clearGapAt(i-1); clearGapAt(i); clearGapAt(i+1);
     renderRouteEditorStops();
@@ -5612,34 +6030,61 @@ document.getElementById('route-editor-stops').addEventListener('click', e=>{
     const i = Number(remove.dataset.idx);
     const n = routeEditorPlaces.length;
     if(i === 0){
+      cacheGapBeforeClear(0);
       if(routeEditorInterstops.length) routeEditorInterstops.splice(0, 1);
     }else if(i === n-1){
+      cacheGapBeforeClear(i-1);
       if(routeEditorInterstops.length) routeEditorInterstops.splice(i-1, 1);
     }else{
+      cacheGapBeforeClear(i-1); cacheGapBeforeClear(i);
       routeEditorInterstops.splice(i-1, 2, []); // two gaps touching the removed place merge into one unknown gap
     }
     routeEditorPlaces.splice(i, 1);
     renderRouteEditorStops();
-  }else if(gapAdd){
-    const gap = Number(gapAdd.dataset.gap);
+  }else if(optionAdd){
+    const gap = Number(optionAdd.dataset.gap);
     if(!routeEditorInterstops[gap]) routeEditorInterstops[gap] = [];
-    routeEditorInterstops[gap].push({ type:'break', time:null, distance:0, cost:null, note:'' });
+    // One starter step included immediately, same as the old "+ Add travel or break" button did —
+    // one click gets you something to edit, rather than an option card with nothing in it yet.
+    routeEditorInterstops[gap].push({ name:'', items: [{ type:'break', time:null, distance:0, cost:null, note:'' }] });
+    syncGapCache(gap);
     renderRouteEditorStops();
-  }else if(gapRemove){
-    const gap = Number(gapRemove.dataset.gap);
-    const item = Number(gapRemove.dataset.item);
-    if(routeEditorInterstops[gap]) routeEditorInterstops[gap].splice(item, 1);
+  }else if(optionRemove){
+    const gap = Number(optionRemove.dataset.gap);
+    const option = Number(optionRemove.dataset.option);
+    if(routeEditorInterstops[gap]) routeEditorInterstops[gap].splice(option, 1);
+    syncGapCache(gap);
     renderRouteEditorStops();
+  }else if(stepAdd){
+    const gap = Number(stepAdd.dataset.gap);
+    const option = Number(stepAdd.dataset.option);
+    const opt = routeEditorInterstops[gap]?.[option];
+    if(!opt) return;
+    opt.items.push({ type:'break', time:null, distance:0, cost:null, note:'' });
+    syncGapCache(gap);
+    renderRouteEditorStops();
+  }else if(stepRemove){
+    const gap = Number(stepRemove.dataset.gap);
+    const option = Number(stepRemove.dataset.option);
+    const item = Number(stepRemove.dataset.item);
+    const opt = routeEditorInterstops[gap]?.[option];
+    if(opt) opt.items.splice(item, 1);
+    syncGapCache(gap);
+    renderRouteEditorStops();
+  }else if(stopRowClick){
+    focusRouteEditorMapOnStop(Number(stopRowClick.dataset.stopIdx));
   }
 });
 document.getElementById('route-editor-stops').addEventListener('change', e=>{
   if(!e.target.classList.contains('route-interstop-type-select')) return;
   const gap = Number(e.target.dataset.gap);
+  const option = Number(e.target.dataset.option);
   const item = Number(e.target.dataset.item);
-  const it = routeEditorInterstops[gap]?.[item];
+  const it = routeEditorInterstops[gap]?.[option]?.items?.[item];
   if(!it) return;
-  const customInput = document.querySelector(`.route-interstop-type-custom[data-gap="${gap}"][data-item="${item}"]`);
-  const dcFields = document.querySelector(`.interstop-dc-fields[data-gap="${gap}"][data-item="${item}"]`);
+  const sel = `[data-gap="${gap}"][data-option="${option}"][data-item="${item}"]`;
+  const customInput = document.querySelector(`.route-interstop-type-custom${sel}`);
+  const dcFields = document.querySelector(`.interstop-dc-fields${sel}`);
   if(e.target.value === '__custom__'){
     customInput?.classList.remove('hidden');
     customInput?.focus();
@@ -5656,10 +6101,14 @@ document.getElementById('route-editor-stops').addEventListener('change', e=>{
       dcFields?.classList.remove('hidden');
     }
   }
+  syncGapCache(gap);
+  updateGapTotalsDisplay(gap);
 });
 // Text/number fields update the draft arrays in place without a full re-render, so typing doesn't
 // lose focus/cursor position — only structural changes (add/remove/reorder) re-render, and only
 // place add/remove/reorder affects the map, so this handler never needs to touch it.
+// updateGapTotalsDisplay() keeps the (visual-only, never saved) combined-total text live without
+// needing that re-render either.
 document.getElementById('route-editor-stops').addEventListener('input', e=>{
   const t = e.target;
   const numOrNull = v => v === '' ? null : Number(v);
@@ -5673,14 +6122,26 @@ document.getElementById('route-editor-stops').addEventListener('input', e=>{
   }
 
   const gap = Number(t.dataset.gap);
+  const option = Number(t.dataset.option);
+
+  if(t.classList.contains('route-interstop-option-name')){
+    const opt = routeEditorInterstops[gap]?.[option];
+    if(!opt) return;
+    opt.name = t.value;
+    syncGapCache(gap);
+    return;
+  }
+
   const item = Number(t.dataset.item);
-  const it = routeEditorInterstops[gap]?.[item];
+  const it = routeEditorInterstops[gap]?.[option]?.items?.[item];
   if(!it) return;
   if(t.classList.contains('route-interstop-type-custom')) it.type = t.value;
   else if(t.classList.contains('route-interstop-time')) it.time = numOrNull(t.value);
   else if(t.classList.contains('route-interstop-distance')) it.distance = numOrNull(t.value);
   else if(t.classList.contains('route-interstop-cost')) it.cost = numOrNull(t.value);
   else if(t.classList.contains('route-interstop-note')) it.note = t.value;
+  syncGapCache(gap);
+  updateGapTotalsDisplay(gap);
 });
 
 // Weighted proximity+variety sort for the add-place search: close options should sort first, but
@@ -5709,27 +6170,35 @@ function scoreRouteSearchCandidate(candidate, lastPlace, alreadyAddedIds){
   return { distance, sameCategory, alreadyInRoute, effectiveBand };
 }
 
-function renderRouteAddResults(){
-  const q = document.getElementById('route-editor-add-search').value;
-  const resultsEl = document.getElementById('route-editor-add-results');
+// One search box renders per "+ Add a place here" widget (routeInsertWidgetHtml(), after every
+// stop), so this is insertAt-parameterized rather than reading one fixed pair of elements — and
+// since #route-editor-stops gets fully rebuilt on any structural change, these boxes' listeners are
+// delegated at the container level below rather than attached per-input (same pattern every other
+// route editor control already uses).
+function renderRouteInsertResults(insertAt){
+  const input = document.querySelector(`.route-insert-search[data-insert-at="${insertAt}"]`);
+  const resultsEl = document.querySelector(`.route-insert-results[data-insert-at="${insertAt}"]`);
+  if(!input || !resultsEl) return;
+  const q = input.value;
   const city = document.getElementById('route-editor-city').value;
   // Shows everything (not just query matches) on focus with an empty query too — in case the
   // user can't recall the exact name, they can just scan the whole list for this city.
-  // Base of operations is now a valid stop (routes can literally include it as first/last), so
-  // it's no longer excluded here — findable and addable like any other place.
+  // Base of operations is a valid stop (routes can literally include it as first/last), so it's
+  // not excluded here — findable and addable like any other place.
   const matches = (tripData?.places||[]).filter(p => p.city === city && placeMatchesKeywords(p, q));
 
-  // The last place already in the route is the reference point for distance — with no stops yet
-  // (or the last one has no coordinates), there's nothing to measure from, so results just keep
-  // their unsorted order same as before this chunk.
-  const lastStop = routeEditorPlaces[routeEditorPlaces.length - 1];
-  const lastPlace = lastStop ? (tripData.places||[]).find(pl=>pl.id===lastStop.placeId) : null;
+  // The place right before this insertion point is the reference for distance/variety scoring —
+  // insertAt is always > 0 here (the widget only ever appears after an existing stop, or as the
+  // sole widget for insertAt:0 on a still-empty route, where there's nothing to reference yet), so
+  // this is always routeEditorPlaces[insertAt-1] rather than always "the route's last stop."
+  const refStop = routeEditorPlaces[insertAt - 1];
+  const refPlace = refStop ? (tripData.places||[]).find(pl=>pl.id===refStop.placeId) : null;
   const alreadyAddedIds = new Set(routeEditorPlaces.map(s=>s.placeId));
 
   const scores = new Map();
-  if(lastPlace?.coords){
+  if(refPlace?.coords){
     matches.forEach(p=>{
-      const s = scoreRouteSearchCandidate(p, lastPlace, alreadyAddedIds);
+      const s = scoreRouteSearchCandidate(p, refPlace, alreadyAddedIds);
       if(s) scores.set(p.id, s);
     });
   }
@@ -5760,24 +6229,33 @@ function renderRouteAddResults(){
       }).join('')
     : '<div class="autocomplete-item" style="opacity:.6; cursor:default;">No matches</div>';
   resultsEl.classList.remove('hidden');
+  // Only one insert-results dropdown open at a time — otherwise every "+ Add a place here" widget
+  // with a non-empty query would stack its own open list at once.
+  document.querySelectorAll('.route-insert-results').forEach(el=>{
+    if(el !== resultsEl) el.classList.add('hidden');
+  });
 }
-document.getElementById('route-editor-add-search').addEventListener('input', renderRouteAddResults);
-document.getElementById('route-editor-add-search').addEventListener('focus', renderRouteAddResults);
-document.getElementById('route-editor-add-results').addEventListener('click', e=>{
+document.getElementById('route-editor-stops').addEventListener('input', e=>{
+  if(!e.target.classList.contains('route-insert-search')) return;
+  renderRouteInsertResults(Number(e.target.dataset.insertAt));
+});
+document.getElementById('route-editor-stops').addEventListener('focus', e=>{
+  if(!e.target.classList.contains('route-insert-search')) return;
+  renderRouteInsertResults(Number(e.target.dataset.insertAt));
+}, true); // focus doesn't bubble — capture phase needed for delegation
+document.getElementById('route-editor-stops').addEventListener('click', e=>{
+  const advancedBtn = e.target.closest('.route-insert-advanced');
+  if(advancedBtn){ openRouteSearchModal(Number(advancedBtn.dataset.insertAt)); return; }
   if(e.target.closest('a')) return; // let the "Map ↗" link open normally, don't also add the place
   const item = e.target.closest('.autocomplete-item');
-  if(!item || !item.dataset.placeId) return;
-  if(routeEditorPlaces.length) routeEditorInterstops.push([]);
-  routeEditorPlaces.push({ type:'place', placeId: item.dataset.placeId, note:'', stayDuration: null });
-  document.getElementById('route-editor-add-search').value = '';
-  document.getElementById('route-editor-add-results').classList.add('hidden');
-  document.getElementById('route-editor-add-results').innerHTML = '';
+  const resultsList = e.target.closest('.route-insert-results');
+  if(!item || !item.dataset.placeId || !resultsList) return;
+  insertRouteEditorPlace(item.dataset.placeId, Number(resultsList.dataset.insertAt));
   renderRouteEditorStops();
 });
 document.addEventListener('click', e=>{
-  if(!e.target.closest('#route-editor-add-search') && !e.target.closest('#route-editor-add-results')){
-    document.getElementById('route-editor-add-results').classList.add('hidden');
-  }
+  if(e.target.closest('.route-insert-search') || e.target.closest('.route-insert-results')) return;
+  document.querySelectorAll('.route-insert-results').forEach(el=>el.classList.add('hidden'));
 });
 
 document.getElementById('route-editor-save').addEventListener('click', async ()=>{
@@ -5788,16 +6266,19 @@ document.getElementById('route-editor-save').addEventListener('click', async ()=
   const city = document.getElementById('route-editor-city').value;
 
   const stops = routeEditorPlaces.map(s => ({ type:'place', placeId: s.placeId, note: s.note||'', stayDuration: s.stayDuration ?? null }));
-  // Each gap is wrapped as { items: [...] } rather than stored as a bare array — Firestore
-  // rejects an array nested directly inside another array ("Nested arrays are not supported"),
-  // and interstops is itself an array. See unwrapInterstopGap()/normalizeRoute() above.
+  // Each gap is wrapped as { options: [ {name, items}, ... ] } rather than stored as a bare array —
+  // Firestore rejects an array nested directly inside another array ("Nested arrays are not
+  // supported"), and interstops is itself an array. See wrapGapOptions()/normalizeRoute() above.
   const interstops = routeEditorPlaces.length > 1
-    ? routeEditorInterstops.map(gap => ({ items: (gap||[]).map(it => ({
-        type: it.type || 'break',
-        time: it.time ?? null,
-        distance: it.type === 'break' ? 0 : (it.distance ?? null),
-        cost: it.type === 'break' ? null : (it.cost ?? null),
-        note: it.note || ''
+    ? routeEditorInterstops.map(gap => ({ options: (gap||[]).map(opt => ({
+        name: opt.name || '',
+        items: (opt.items||[]).map(it => ({
+          type: it.type || 'break',
+          time: it.time ?? null,
+          distance: it.type === 'break' ? 0 : (it.distance ?? null),
+          cost: it.type === 'break' ? null : (it.cost ?? null),
+          note: it.note || ''
+        }))
       })) }))
     : [];
   const totalWantRating = stops.reduce((sum, s)=>{
@@ -5857,9 +6338,15 @@ const ROUTE_SEARCH_MARKER_COLOR_LAST_STOP = '#C0913A'; // --mustard — a third,
                                                          // values, not var(--harbor)/var(--moss)/
                                                          // var(--mustard) references.
 
-function openRouteSearchModal(){
+// insertAt: where a place picked here should land (see insertRouteEditorPlace()) — set by whichever
+// "🔍 Advanced" button opened this (one per "+ Add a place here" widget, see
+// routeInsertWidgetHtml()), stored for the whole time the modal's open since every render/add
+// action in it needs the same reference point.
+let routeSearchInsertAt = 0;
+function openRouteSearchModal(insertAt){
   const city = document.getElementById('route-editor-city').value;
   if(!city) return;
+  routeSearchInsertAt = insertAt;
   routeSearchChecked = new Set();
   routeSearchQuery = '';
   routeSearchCatFilter = null;
@@ -5869,7 +6356,6 @@ function openRouteSearchModal(){
   renderRouteSearchList();
 }
 function closeRouteSearchModal(){ document.getElementById('route-search-modal').classList.add('hidden'); }
-document.getElementById('btn-route-advanced-search').addEventListener('click', openRouteSearchModal);
 document.getElementById('rs-cancel').addEventListener('click', closeRouteSearchModal);
 document.getElementById('route-search-modal').addEventListener('click', e=>{
   if(e.target.id === 'route-search-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeRouteSearchModal();
@@ -5912,21 +6398,23 @@ document.getElementById('rs-search').addEventListener('input', e=>{
 });
 
 // Same weighted-score sort as the inline search (scoreRouteSearchCandidate(), see above) — sorted
-// once here and reused for both the list order and the "X away" distance label per row. The route's
-// current last stop is pulled out of the regular candidate list entirely — it's shown separately
-// (a banner atop the list, a distinctly colored map marker) as a fixed reference point, not
-// something you're picking from; other already-in-route places stay in the list (just deprioritized
-// by the score), since revisiting one of those is sometimes deliberate.
+// once here and reused for both the list order and the "X away" distance label per row. The
+// reference place — whichever stop sits right before routeSearchInsertAt, not necessarily the
+// route's actual last stop anymore (this modal can now open from any "+ Add a place here" widget,
+// see routeInsertWidgetHtml()) — is pulled out of the regular candidate list entirely and shown
+// separately (a banner atop the list, a distinctly colored map marker) as a fixed reference point,
+// not something you're picking from; other already-in-route places stay in the list (just
+// deprioritized by the score), since revisiting one of those is sometimes deliberate.
 function orderedRouteSearchResults(){
   const candidatesAll = getRouteSearchCandidates();
-  const lastStop = routeEditorPlaces[routeEditorPlaces.length - 1];
-  const lastPlace = lastStop ? (tripData.places||[]).find(pl=>pl.id===lastStop.placeId) : null;
-  const candidates = lastPlace ? candidatesAll.filter(p=>p.id !== lastPlace.id) : candidatesAll;
+  const refStop = routeEditorPlaces[routeSearchInsertAt - 1];
+  const refPlace = refStop ? (tripData.places||[]).find(pl=>pl.id===refStop.placeId) : null;
+  const candidates = refPlace ? candidatesAll.filter(p=>p.id !== refPlace.id) : candidatesAll;
   const alreadyAddedIds = new Set(routeEditorPlaces.map(s=>s.placeId));
   const scores = new Map();
-  if(lastPlace?.coords){
+  if(refPlace?.coords){
     candidates.forEach(p=>{
-      const s = scoreRouteSearchCandidate(p, lastPlace, alreadyAddedIds);
+      const s = scoreRouteSearchCandidate(p, refPlace, alreadyAddedIds);
       if(s) scores.set(p.id, s);
     });
   }
@@ -5942,18 +6430,18 @@ function orderedRouteSearchResults(){
           || (sa.distance - sb.distance);
       })
     : candidates;
-  return { ordered, scores, lastPlace };
+  return { ordered, scores, lastPlace: refPlace };
 }
 
-function renderRouteSearchLastStopBanner(lastPlace){
+function renderRouteSearchLastStopBanner(refPlace){
   const el = document.getElementById('rs-last-stop-banner');
-  if(!lastPlace){ el.innerHTML = ''; return; }
-  const thumb = routeStopThumbHtml(lastPlace, 'place-thumb-sm');
+  if(!refPlace){ el.innerHTML = ''; return; }
+  const thumb = routeStopThumbHtml(refPlace, 'place-thumb-sm');
   el.innerHTML = `<div class="rs-last-stop-banner">
     ${thumb}
     <div>
-      <div class="place-meta" style="text-transform:uppercase; letter-spacing:.03em; font-size:.7rem;">Last stop in route</div>
-      <div class="place-name" style="font-size:.92rem;">${lastPlace.name}</div>
+      <div class="place-meta" style="text-transform:uppercase; letter-spacing:.03em; font-size:.7rem;">Adding after</div>
+      <div class="place-name" style="font-size:.92rem;">${refPlace.name}</div>
     </div>
   </div>`;
 }
@@ -6054,10 +6542,10 @@ document.getElementById('rs-add').addEventListener('click', ()=>{
   // doesn't un-check it just because a later filter change hid its row) — city-array order, not
   // Set insertion order, so "Add selected" produces a stable, predictable stop order.
   const toAdd = (tripData?.places||[]).filter(p => p.city === city && routeSearchChecked.has(p.id));
-  toAdd.forEach(p=>{
-    if(routeEditorPlaces.length) routeEditorInterstops.push([]);
-    routeEditorPlaces.push({ type:'place', placeId: p.id, note:'', stayDuration: null });
-  });
+  // Insert right after routeSearchInsertAt's reference stop, in that same stable order — each
+  // successive insert lands one slot further along so the whole batch ends up contiguous and in
+  // order, rather than each one landing back at the same spot and reversing the order.
+  toAdd.forEach((p, idx) => insertRouteEditorPlace(p.id, routeSearchInsertAt + idx));
   renderRouteEditorStops();
   closeRouteSearchModal();
 });
@@ -6416,15 +6904,16 @@ function renderNpList(){
   // list above — they're not scoped by npCatFilter, and each hasn't been saved to the trip at all
   // yet (js-np-ai-add below adds the place AND the day-route in one action).
   const aiHtml = npAiResults.length ? `
-    <div class="place-meta" style="margin:14px 0 6px; font-weight:600;">✨ AI suggestions (not yet saved to this trip)</div>
+    <div class="place-meta" style="margin:0 0 6px; font-weight:600;">✨ AI suggestions (not yet saved to this trip)</div>
     ${npAiResults.map((p,i)=>`<div class="card" style="margin-bottom:10px; border-color:var(--harbor);">
       ${placeDetailHtml(p)}
       <div style="display:flex; justify-content:flex-end; margin-top:8px;">
         <button type="button" class="btn-small js-np-ai-add" data-idx="${i}">+ Add to today</button>
       </div>
     </div>`).join('')}
+    <div class="place-meta" style="margin:4px 0 14px; font-weight:600;">Saved places nearby</div>
   ` : '';
-  el.innerHTML = savedHtml + aiHtml;
+  el.innerHTML = aiHtml + savedHtml;
   updateDayPriceConversions(results.map(r=>r.p));
   renderNpMap(results);
 }
@@ -6733,8 +7222,7 @@ function renderDayRouteOverviewHtml(route){
   const { places, interstops } = normalizeRoute(route);
   const rowPlaces = [];
   const rows = places.map((s,si)=>{
-    const gapStr = si < places.length-1 ? formatInterstopGap(interstops[si], true) : '';
-    const legLine = gapStr ? `<div class="place-meta" style="margin:4px 0 8px 14px;">↓ ${gapStr}</div>` : '';
+    const legLine = si < places.length-1 ? interstopGapLinesHtml(interstops[si], true, { style:'margin:4px 0 8px 14px;' }) : '';
     const key = routeStopKey(route.id, si);
     const done = !!tripNotes.routeStops?.[key]?.done;
     const doneClass = done ? ' stop-done' : '';
@@ -6869,8 +7357,8 @@ function renderDayStopDetailHtml(route, stopIdx){
 
   const p = (tripData.places||[]).find(pl=>pl.id===s.placeId);
   const stayStr = formatMinutes(s.stayDuration);
-  const gapStr = stopIdx > 0 ? formatInterstopGap(interstops[stopIdx-1], true) : '';
-  const gapLine = gapStr ? `<p class="place-meta">Getting here: ${gapStr}</p>` : '';
+  const gapOptionLines = stopIdx > 0 ? interstopGapLinesHtml(interstops[stopIdx-1], true, { tag:'p', className:'place-meta' }) : '';
+  const gapLine = gapOptionLines ? `<p class="place-meta" style="font-weight:600; margin-bottom:2px;">Getting here:</p>${gapOptionLines}` : '';
   if(p) updateDayPriceConversions([p]);
   // undefined (the key is entirely absent — this stop's rating was never saved, or was saved
   // before this field existed) is deliberately kept distinct from null (a previous save explicitly
@@ -7963,6 +8451,387 @@ async function startCoordsFixer(explicitPlaces){
   })();
 }
 document.getElementById('btn-check-coords').addEventListener('click', ()=>startCoordsFixer());
+
+// ---------- Auto-generate trip wizard ----------
+// Fully automated version of the existing Places/Routes AI generation — no paste-back, no review
+// checklist, just pick counts and watch it happen. This is why it needs Tier 3 specifically: there's
+// no human in the loop to run a prompt through their own AI and paste the result back. Reuses the
+// exact same building blocks as the manual flows (AI_PLACE_SCHEMA_DOC, sanitizePlaceItem(),
+// getEligiblePlacesForRoutes(), findBasePlace(), routesTravelSchemaDoc(), generateRoutesByAlgorithm(),
+// parseRoutesJson()) rather than a parallel implementation — this wizard's own code is just
+// orchestration (loop over cities, call the Cloud Function, reveal results, write to Firestore) and
+// two prompt-builders whose only real difference from the manual modals' is reading trip-saved
+// preferences directly instead of a batch-edit form (see buildAutogenPlacesPrompt()/
+// buildAutogenRoutesPrompt() below).
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+let autogenActive = false;
+let autogenStopRequested = false;
+let autogenRouteMethod = 'algo';
+let autogenMap = null;
+
+function updateAutogenMethodChips(){
+  document.querySelectorAll('#autogen-route-method .cat-chip').forEach(c=>{
+    c.classList.toggle('active', c.dataset.method === autogenRouteMethod);
+  });
+  // The algorithm doesn't read free text at all — only show the routes-instructions box when AI
+  // is actually the method that would use it.
+  document.getElementById('autogen-routes-notes-field').classList.toggle('hidden', autogenRouteMethod !== 'ai');
+}
+document.getElementById('autogen-route-method').addEventListener('click', e=>{
+  const btn = e.target.closest('.cat-chip');
+  if(!btn) return;
+  autogenRouteMethod = btn.dataset.method;
+  updateAutogenMethodChips();
+});
+
+function openAutogenModal(){
+  if(!currentTripId) return;
+  const cities = tripData?.meta?.cities || [];
+  document.getElementById('autogen-no-cities-hint').classList.toggle('hidden', cities.length > 0);
+  document.getElementById('autogen-cities-list').textContent = cities.map(c=>c.name).filter(Boolean).join(', ') || '(none)';
+  document.getElementById('autogen-places-count').value = 10;
+  document.getElementById('autogen-routes-count').value = 3;
+  document.getElementById('autogen-stops-per-route').value = '';
+  document.getElementById('autogen-places-notes').value = '';
+  document.getElementById('autogen-routes-notes').value = '';
+  autogenRouteMethod = 'algo';
+  updateAutogenMethodChips();
+  document.getElementById('autogen-step-setup').classList.remove('hidden');
+  document.getElementById('autogen-step-progress').classList.add('hidden');
+  document.getElementById('autogen-modal').classList.remove('hidden');
+}
+function closeAutogenModal(){
+  autogenStopRequested = true; // stop any in-flight loop if the modal is dismissed mid-run
+  document.getElementById('autogen-modal').classList.add('hidden');
+}
+document.getElementById('autogen-cancel-1').addEventListener('click', closeAutogenModal);
+document.getElementById('autogen-stop').addEventListener('click', ()=>{ autogenStopRequested = true; });
+document.getElementById('autogen-done').addEventListener('click', closeAutogenModal);
+document.getElementById('autogen-modal').addEventListener('click', e=>{
+  if(e.target.id === 'autogen-modal' && isClickPastModalMargin(e, MODAL_OUTSIDE_CLICK_MARGIN_PX)) closeAutogenModal();
+});
+
+// Deliberately reads tripData.meta.preferences directly rather than a batch-edit form — this
+// wizard has no per-batch preferences screen, it just uses whatever's already saved on the trip.
+// `notes` is the setup screen's free-text "Additional instructions for places" box — same
+// "Notes specific to this batch only" convention buildAiInstruction()/buildRoutesInstruction() use.
+function buildAutogenPlacesPrompt(city, count, notes){
+  const meta = tripData?.meta || {};
+  const prefs = meta.preferences || {};
+  const existingNames = (tripData?.places||[]).map(p=>p.name).filter(Boolean);
+  const lines = [];
+  lines.push(`I'm planning a trip${meta.name ? ` ("${meta.name}")` : ''}. Suggest specific, real, visitable places in ${city} — not generic categories.`);
+  if(prefs.numPeople) lines.push(`Number of people: ${prefs.numPeople}.`);
+  if(prefs.budget?.realistic) lines.push(`Budget: realistically aiming for ${prefs.budget.realistic} ${meta.defaultCurrency||''}.`);
+  if((prefs.travelMethods||[]).length) lines.push(`Getting around by: ${prefs.travelMethods.join(', ')}.`);
+  if((prefs.catWant||[]).length) lines.push(`Especially interested in: ${prefs.catWant.join(', ')}.`);
+  if((prefs.catAvoid||[]).length) lines.push(`Not interested in: ${prefs.catAvoid.join(', ')}.`);
+  if((prefs.wantToSee||[]).length) lines.push(`Include a full JSON entry for each of these specific places the user already wants: ${prefs.wantToSee.join(', ')}.`);
+  if((prefs.placesToAvoid||[]).length) lines.push(`Avoid suggesting: ${prefs.placesToAvoid.join(', ')}.`);
+  if(notes) lines.push(`Notes specific to this batch only: ${notes}`);
+  lines.push(`Generate roughly ${count} places for this city.`);
+  if(existingNames.length) lines.push(`Do NOT include any of these — they're already on the list: ${existingNames.join(', ')}.`);
+  lines.push('');
+  lines.push(AI_PLACE_SCHEMA_DOC);
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+function parseAiPlacesJson(text){
+  let parsed;
+  try{ parsed = JSON.parse(text); }
+  catch(err){ throw new Error(`AI response wasn't valid JSON: ${err.message}`); }
+  if(!Array.isArray(parsed)) throw new Error('Expected a JSON array.');
+  const errors = [];
+  const places = parsed.map((item,i)=>sanitizePlaceItem(item, errors, i, { source: { ai: true, user: false } })).filter(Boolean);
+  if(!places.length) throw new Error(errors.length ? errors.join(' ') : 'No places found in the response.');
+  return places;
+}
+
+async function generatePlacesForCity(city, count, notes){
+  const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt: buildAutogenPlacesPrompt(city, count, notes) });
+  return parseAiPlacesJson(result.data.text);
+}
+
+// stopsPerRoute/notes come from the setup screen's own fields when filled in, else fall back to
+// the trip's saved preferences.stopsPerRoute default — same override-with-a-fallback pattern the
+// Routes tab's own AI-generation modal already uses for the same field.
+function buildAutogenRoutesPrompt(city, count, stopsPerRoute, notes){
+  const base = findBasePlace();
+  const eligible = getEligiblePlacesForRoutes(city);
+  const prefs = tripData?.meta?.preferences || {};
+  const lines = [];
+  lines.push(`I'm planning walking/transit routes for ${city} that thread together specific places I've already saved, grouped so each route is geographically coherent (don't zigzag across the city) and prioritizes higher-rated places.`);
+  if(base?.coords) lines.push(`IMPORTANT: every route MUST explicitly include the base of operations, "${base.name}" (id "${base.id}"), as the FIRST and LAST entry in "stops" — not implied, not omitted, an actual stop like any other with that exact placeId.`);
+  if(prefs.maxStepsPerDay) lines.push(`Prefers no more than about ${prefs.maxStepsPerDay} steps/day — weight route length accordingly.`);
+  if(stopsPerRoute) lines.push(`Aim for about ${stopsPerRoute} stops per route, not counting the base of operations.`);
+  if((prefs.travelMethods||[]).length) lines.push(`Getting around by: ${prefs.travelMethods.join(', ')}.`);
+  if(notes) lines.push(`Notes specific to this batch only: ${notes}`);
+  lines.push(`Generate roughly ${count} candidate routes. Each route should thread together higher-rated places (wantRating above 7 is near-essential) with a couple of lower-rated "mini" stops along the way where geographically sensible.`);
+  lines.push(`Use "interstops" for anything between two stops — leave a gap's array empty if no travel note is needed (e.g. two stops right next to each other), or include more than one item if the leg genuinely has multiple parts (e.g. a short walk then a break).`);
+  if(base?.coords) lines.push(`Reminder: "stops"[0] and "stops"[stops.length-1] must both have "placeId": "${base.id}".`);
+  lines.push('');
+  lines.push('Places available for this city (use "id" values exactly as given for "placeId" — do not invent new ids):');
+  const placesForPrompt = base?.coords ? eligible.concat([base]) : eligible;
+  lines.push(JSON.stringify(placesForPrompt.map(p=>({ id: p.id, name: p.name, wantRating: p.wantRating, cat: p.cat, coords: p.coords })), null, 2));
+  lines.push('');
+  lines.push(routesTravelSchemaDoc(base));
+  lines.push('');
+  lines.push('Output ONLY a raw JSON array of these objects — no markdown, no code fences, no commentary before or after.');
+  return lines.join('\n');
+}
+
+async function generateRoutesForCityViaAi(city, count, stopsPerRoute, notes){
+  const result = await cloudFunctions.httpsCallable('generateAiContent')({ prompt: buildAutogenRoutesPrompt(city, count, stopsPerRoute, notes) });
+  return parseRoutesJson(result.data.text, city);
+}
+
+// Routes need real coordinates to cluster/order on (getEligiblePlacesForRoutes() filters to
+// p.coords), but AI place generation only includes an approximate guess when the model is
+// confident (AI_PLACE_SCHEMA_DOC explicitly tells it to omit coords otherwise) — so a freshly
+// AI-generated city routinely has few or zero eligible places, and route generation for that city
+// silently produces nothing. The normal fix (the "📍 Check coordinates" flow) is a one-place-at-a-
+// time interactive review, which doesn't fit this wizard's hands-off design — the user explicitly
+// doesn't want to sit through manual entry here. This is the headless equivalent: reuses the exact
+// same geocodePlace() (Nominatim, name+city+area with an area-dropped retry) the interactive fixer
+// already uses, but — since there's no one here to compare an AI guess against a geocoded result —
+// always takes the geocoded result outright rather than only auto-confirming when there's no prior
+// AI guess or the two are within COORDS_AUTO_CONFIRM_THRESHOLD_M. For this automated flow a real
+// geocoded position is trusted over an LLM's guess unconditionally; the place still shows up in the
+// normal "needs check" queue afterward like any coordsSource:"osm" place would if the user wants to
+// eyeball it later — this isn't a substitute for that, just what unblocks route generation now.
+// Only called when routes are actually being generated for the city (see runAutogen()) — a
+// places-only run has no reason to pay this cost.
+async function autoGeocodeCityPlaces(city, onProgress){
+  const candidates = (tripData.places||[]).filter(p => p.city === city && !(p.cat||[]).includes('base') && coordsNeedsCheck(p));
+  if(!candidates.length) return { checked: 0, found: 0 };
+  const updated = tripData.places.slice();
+  let found = 0;
+  for(let i=0; i<candidates.length; i++){
+    if(autogenStopRequested) break;
+    const p = candidates[i];
+    if(onProgress) onProgress(i, candidates.length);
+    const result = await geocodePlace(p);
+    if(result){
+      const idx = updated.findIndex(x => x.id === p.id);
+      if(idx !== -1) updated[idx] = { ...updated[idx], coords: { lat: result.lat, lng: result.lng }, coordsSource: 'osm' };
+      found++;
+    }
+    // Nominatim's usage policy asks for ~1 request/sec — geocodePlace() already paces its own
+    // internal area-dropped retry, this paces between different places the same way the
+    // interactive coordinate fixer's background loop does.
+    await sleep(1100);
+  }
+  if(found){
+    await db.collection('tripData').doc(currentTripId).update({ places: updated });
+    tripData.places = updated;
+  }
+  return { checked: candidates.length, found };
+}
+
+function initAutogenMap(){
+  const container = document.getElementById('autogen-map');
+  if(!container) return;
+  if(autogenMap){ autogenMap.remove(); autogenMap = null; }
+  autogenMap = L.map(container).setView([20, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(autogenMap);
+}
+
+function autogenScrollToBottom(){
+  const pane = document.getElementById('autogen-list-pane');
+  pane.scrollTop = pane.scrollHeight;
+}
+
+// Cosmetic-only toggle — adds/removes the CSS class that drives .autogen-item's entrance animation
+// (see the @keyframes rule above). Deliberately never gates or delays the actual generation work in
+// runAutogen(): the loop below yields with a bare sleep(0) regardless of this setting, purely so the
+// browser gets a chance to paint each item as it's added, not to pace a visual effect. Checkable
+// live while a run is in progress.
+document.getElementById('autogen-animate-toggle').addEventListener('change', e=>{
+  document.getElementById('autogen-list').classList.toggle('animate', e.target.checked);
+});
+
+function updateAutogenProgress(done, total){
+  const bar = document.getElementById('autogen-progress-bar');
+  const pct = total > 0 ? Math.min(100, Math.round((done/total)*100)) : 0;
+  bar.value = pct;
+  return pct;
+}
+
+// One place "arriving" — same detail richness as everywhere else (placeDetailHtml()) plus a marker
+// dropped onto this modal's own map if it has coordinates.
+function appendAutogenPlace(place, city){
+  const el = document.getElementById('autogen-list');
+  const div = document.createElement('div');
+  div.className = 'card autogen-item';
+  div.style.marginBottom = '10px';
+  div.innerHTML = `<div class="place-meta" style="margin-bottom:4px;">📍 ${city}</div>${placeDetailHtml(place)}`;
+  el.appendChild(div);
+  autogenScrollToBottom();
+  if(place.coords && autogenMap){
+    const marker = L.circleMarker([place.coords.lat, place.coords.lng], {
+      radius: 7, weight: 2, color: '#fff', fillColor: '#5E7A57', fillOpacity: 0.9 // --moss
+    }).addTo(autogenMap).bindTooltip(place.name);
+    const bounds = autogenMap._layers ? Object.values(autogenMap._layers).filter(l=>l.getLatLng).map(l=>l.getLatLng()) : [marker.getLatLng()];
+    if(bounds.length === 1) autogenMap.setView(bounds[0], 13);
+    else autogenMap.fitBounds(bounds, { padding: [30,30] });
+  }
+}
+
+function appendAutogenRoute(route, city){
+  const el = document.getElementById('autogen-list');
+  const div = document.createElement('div');
+  div.className = 'card autogen-item';
+  div.style.marginBottom = '10px';
+  const base = findBasePlace();
+  div.innerHTML = `<div class="place-meta" style="margin-bottom:4px;">🧭 ${city}</div>
+    <div class="place-name">${route.label} <span class="tag">${route.generatedBy==='algorithm'?'🧮 Algorithm':'✨ AI-generated'}</span></div>
+    <p class="place-meta">Total want rating: ${route.totalWantRating}</p>
+    <div style="margin:8px 0;">${routeStopSequenceLine(route, base, 'place-thumb-sm')}</div>`;
+  el.appendChild(div);
+  autogenScrollToBottom();
+}
+
+function appendAutogenLogLine(text){
+  const el = document.getElementById('autogen-list');
+  const div = document.createElement('div');
+  div.className = 'place-meta autogen-item';
+  div.style.margin = '6px 0';
+  div.textContent = text;
+  el.appendChild(div);
+  autogenScrollToBottom();
+}
+
+async function runAutogen(){
+  if(autogenActive) return;
+  autogenActive = true;
+  autogenStopRequested = false;
+  const placesPerCity = Math.max(1, Number(document.getElementById('autogen-places-count').value) || 10);
+  const routesPerCity = Math.max(0, Number(document.getElementById('autogen-routes-count').value) || 0);
+  const cities = (tripData?.meta?.cities || []).map(c=>c.name).filter(Boolean);
+  const stopsPerRoute = Number(document.getElementById('autogen-stops-per-route').value) || tripData?.meta?.preferences?.stopsPerRoute || 5;
+  const placesNotes = document.getElementById('autogen-places-notes').value.trim();
+  const routesNotes = document.getElementById('autogen-routes-notes').value.trim();
+
+  document.getElementById('autogen-step-setup').classList.add('hidden');
+  document.getElementById('autogen-step-progress').classList.remove('hidden');
+  document.getElementById('autogen-list').innerHTML = '';
+  document.getElementById('autogen-list').classList.toggle('animate', document.getElementById('autogen-animate-toggle').checked);
+  document.getElementById('autogen-done').classList.add('hidden');
+  initAutogenMap();
+
+  const statusEl = document.getElementById('autogen-status');
+  let totalPlacesAdded = 0, totalRoutesAdded = 0;
+  // Planned total for the progress bar — an estimate, not a promise: the AI can return more/fewer
+  // places than asked for, and a city can fail outright and contribute 0. doneSteps only counts
+  // items actually added, so the bar can't overshoot 100%, it just may not reach it on a partial run.
+  // The geocoding pass (routesPerCity > 0 only, see autoGeocodeCityPlaces()) adds up to placesPerCity
+  // more steps per city — an estimate too, since not every place will actually need checking.
+  const plannedTotal = cities.length * (placesPerCity + (routesPerCity > 0 ? routesPerCity + placesPerCity : 0));
+  let doneSteps = 0;
+  updateAutogenProgress(0, plannedTotal);
+
+  for(const city of cities){
+    if(autogenStopRequested) break;
+    statusEl.innerHTML = `<span class="spinner"></span>Generating places for ${city}…`;
+    let places;
+    try{
+      places = await generatePlacesForCity(city, placesPerCity, placesNotes);
+    }catch(err){
+      appendAutogenLogLine(`⚠ Couldn't generate places for ${city}: ${err.message || err.code || 'unknown error'}`);
+      continue;
+    }
+    if(autogenStopRequested) break;
+
+    // The whole AI response already arrived at once (generateAiContent isn't a streaming call) — this
+    // just adds items one at a time so the list/map/progress bar update incrementally rather than
+    // jumping straight to "done." The sleep(0) below only yields a frame for the browser to paint;
+    // it's not a pacing delay, so this loop runs as fast as the DOM/Firestore allow either way.
+    const addedPlaces = [];
+    for(const place of places){
+      if(autogenStopRequested) break;
+      appendAutogenPlace(place, city);
+      addedPlaces.push(place);
+      doneSteps++;
+      const pct = updateAutogenProgress(doneSteps, plannedTotal);
+      statusEl.innerHTML = `<span class="spinner"></span>Adding places for ${city}… (${addedPlaces.length}/${places.length}) — ${pct}%`;
+      await sleep(0);
+    }
+    if(addedPlaces.length){
+      const allPlaces = (tripData.places||[]).concat(addedPlaces);
+      await db.collection('tripData').doc(currentTripId).update({ places: allPlaces });
+      tripData.places = allPlaces;
+      totalPlacesAdded += addedPlaces.length;
+    }
+
+    if(routesPerCity > 0 && !autogenStopRequested){
+      // Routes need real coordinates — AI-generated places often don't have them (see
+      // autoGeocodeCityPlaces()'s comment). Geocode whatever's missing/unverified for this city
+      // before attempting to cluster/order routes, so route generation actually has places to work
+      // with instead of silently producing nothing.
+      const geoResult = await autoGeocodeCityPlaces(city, (i, total)=>{
+        doneSteps++;
+        const pct = updateAutogenProgress(doneSteps, plannedTotal);
+        statusEl.innerHTML = `<span class="spinner"></span>Checking coordinates for ${city}… (${i+1}/${total}) — ${pct}%`;
+      });
+      if(geoResult.checked){
+        appendAutogenLogLine(`📍 ${city}: found coordinates for ${geoResult.found}/${geoResult.checked} place(s) that needed checking.`);
+      }
+      if(autogenStopRequested) break;
+
+      statusEl.innerHTML = `<span class="spinner"></span>Generating routes for ${city}…`;
+      let routes = [];
+      try{
+        if(autogenRouteMethod === 'algo'){
+          const result = generateRoutesByAlgorithm(city, { routeCount: routesPerCity, stopsPerRoute });
+          if(result.error) throw new Error(result.error);
+          routes = result.routes;
+        }else{
+          routes = await generateRoutesForCityViaAi(city, routesPerCity, stopsPerRoute, routesNotes);
+        }
+      }catch(err){
+        appendAutogenLogLine(`⚠ Couldn't generate routes for ${city}: ${err.message || err.code || 'unknown error'}`);
+      }
+      const addedRoutes = [];
+      for(const route of routes){
+        if(autogenStopRequested) break;
+        appendAutogenRoute(route, city);
+        addedRoutes.push(route);
+        doneSteps++;
+        const pct = updateAutogenProgress(doneSteps, plannedTotal);
+        statusEl.innerHTML = `<span class="spinner"></span>Adding routes for ${city}… (${addedRoutes.length}/${routes.length}) — ${pct}%`;
+        await sleep(0);
+      }
+      if(addedRoutes.length){
+        const allRoutes = (tripData.routes||[]).concat(addedRoutes);
+        await db.collection('tripData').doc(currentTripId).update({ routes: allRoutes });
+        tripData.routes = allRoutes;
+        totalRoutesAdded += addedRoutes.length;
+      }
+    }
+  }
+
+  if(totalPlacesAdded || totalRoutesAdded){
+    await db.collection('trips').doc(currentTripId).update({ updatedAt: Date.now() });
+  }
+  renderPlaces();
+  updateAutogenProgress(plannedTotal, plannedTotal); // snap to 100% on completion/stop either way
+  const cityCount = cities.length;
+  statusEl.textContent = autogenStopRequested
+    ? `Stopped — ${totalPlacesAdded} place(s) and ${totalRoutesAdded} route(s) added so far.`
+    : `✓ Done — ${totalPlacesAdded} place(s) and ${totalRoutesAdded} route(s) added across ${cityCount} cit${cityCount===1?'y':'ies'}. Check coordinates and assign routes to days whenever you're ready.`;
+  document.getElementById('autogen-done').classList.remove('hidden');
+  autogenActive = false;
+}
+document.getElementById('autogen-start').addEventListener('click', ()=>{
+  if(!(tripData?.meta?.cities||[]).length) return;
+  runAutogen();
+});
 </script>
 </body>
 </html>

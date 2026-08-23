@@ -245,32 +245,52 @@ tripData/{tripId}                  — trip content, fetched once per open, over
         ],
         interstops: [   // array with stops.length-1 entries — interstops[i] describes everything
                         // between stops[i] and stops[i+1]. Each entry is an OBJECT wrapping a list
-                        // of ZERO OR MORE items — { items: [...] } — NOT a bare array; Firestore
-                        // rejects "Nested arrays are not supported" for an array directly inside
-                        // another array, and interstops is itself an array, so each gap's list has
-                        // to be wrapped in a map value instead. This bit the very first real save
-                        // after the interstop model shipped (every manual-editor save and every AI
-                        // import failed with that exact error) — unwrapInterstopGap()/
-                        // normalizeRoute() (index.html) are the only code that has to know about
-                        // the wrapper; everything else works with plain arrays via normalizeRoute().
-                        // items: [] means the two stops need no travel note at all (e.g. two shops
-                        // right next to each other in the same building), more than one item means
-                        // the leg genuinely has multiple parts (e.g. a short walk then a break, or a
-                        // bus then a walk). Replaces the older model where a break was its own
-                        // interleaved stop and each stop carried at most one travel[0] leg — that
-                        // conflated "a thing you visit" with "a thing between two visits" and
-                        // couldn't express zero-travel adjacency or a multi-part gap. Each item:
-          { type, time, distance, cost, note }
-          // type: "break" or one of TRAVEL_LEG_TYPES (walk/metro/bus/train/taxi/ferry/car/bike) or
-          // a free-text custom value picked via a "Custom…" option in the editor
-          // time: number of minutes or null
-          // distance: number of meters or null — only meaningful for non-break types, stored 0 for
-          // a break (never hidden as a separate field)
-          // cost: plain number or null, always assumed to be in meta.defaultCurrency — no per-item
-          // currency field; null means "free"/unknown, never a bare 0
-          // note: free text, e.g. "lunch at a café" for a break or a platform/line number for
-          // transit — kept as one field for both cases rather than splitting break-note vs.
-          // travel-details, since the two never coexist on the same item
+                        // of ZERO OR MORE alternative OPTIONS — { options: [...] } — NOT a bare
+                        // array; Firestore rejects "Nested arrays are not supported" for an array
+                        // directly inside another array, and interstops is itself an array, so each
+                        // gap's list has to be wrapped in a map value instead. This bit the very
+                        // first real save after the interstop model shipped (every manual-editor
+                        // save and every AI import failed with that exact error) —
+                        // wrapGapOptions()/normalizeRoute() (index.html) are the only code that has
+                        // to know about the wrapper; everything else works with a plain options
+                        // array via normalizeRoute(). options: [] means the two stops need no travel
+                        // note at all (e.g. two shops right next to each other in the same
+                        // building).
+                        //
+                        // REVISED — a gap can hold more than one alternative way to get between its
+                        // two stops (e.g. "metro then a short walk" vs. "one direct bus"), added
+                        // because manual entry kept losing this: only one travel method could be
+                        // recorded per gap even though a real trip routinely has a fallback option.
+                        // Each option:
+          { name, items: [ { type, time, distance, cost, note }, ... ] }
+          // name: free text (e.g. "Metro + walk"), "" if not given — migrated from pre-multi-option
+          // data (see below) with name:"" rather than a placeholder like "Option 1", so an old gap's
+          // single travel method doesn't read as artificially labeled.
+          // items: same shape and meaning as before multi-option existed — zero or more steps
+          // making up this one option; more than one item means this option's own leg genuinely has
+          // multiple parts (e.g. a short walk then a break, or a bus then a walk). Each item:
+          //   type: "break" or one of TRAVEL_LEG_TYPES (walk/metro/bus/train/taxi/ferry/car/bike) or
+          //   a free-text custom value picked via a "Custom…" option in the editor
+          //   time: number of minutes or null
+          //   distance: number of meters or null — only meaningful for non-break types, stored 0 for
+          //   a break (never hidden as a separate field)
+          //   cost: plain number or null, always assumed to be in meta.defaultCurrency — no per-item
+          //   currency field; null means "free"/unknown, never a bare 0
+          //   note: free text, e.g. "lunch at a café" for a break or a platform/line number for
+          //   transit — kept as one field for both cases rather than splitting break-note vs.
+          //   travel-details, since the two never coexist on the same item
+          //
+          // Deliberately no "primary"/"selected" option field on the gap — every option is shown
+          // wherever a gap is displayed (each on its own line, see "Routing / planning" → "Multiple
+          // travel options per gap"), and a route's total time (computeRouteTotalTime()) is a
+          // min–max RANGE across whichever options have numbers entered, rather than one option
+          // being picked to represent the gap. A single-option gap (the common case, and everything
+          // migrated from before this existed) just has min===max, shown as one plain number.
+          //
+          // A route's own combined distance/time per option (shown next to that option in the
+          // editor and in every display of it) is always computed live from its items — a plain
+          // sum, purely for display, and deliberately NOT stored as its own field: storing a derived
+          // total invites it silently drifting out of sync with the items actually entered.
         ],
         totalWantRating,   // always computed by summing referenced places' wantRating, never
                            // trusted from AI output or hand-entered directly
@@ -280,15 +300,18 @@ tripData/{tripId}                  — trip content, fetched once per open, over
                            // without clearing source.ai (see places[].source above)
       }
     ],
-    // Routes saved before the interstop unification store the OLD shape instead: stops[]
+    // Routes saved before multi-option interstops (see above) store interstops[i] as
+    // { items: [...] } directly — one implicit unnamed option, no options[] wrapper at all.
+    // Routes saved before the interstop unification entirely store the OLDEST shape instead: stops[]
     // interleaves place/break entries (a break is its own stop with no placeId, discriminated by
     // `type`) and each stop carries at most one `travel[0]` leg describing the trip to the next
     // stop — `{ type, distance, time, cost, details }`, same field meanings as an interstop item
-    // above (details ~= note). Not migrated — normalizeRoute(route) is the one place that
-    // understands both shapes and reconstructs the equivalent {places, interstops} view on the
-    // fly; every renderer and the editor read a route through it rather than touching
-    // stops/interstops directly. Saving through the editor always writes the new shape, so an old
-    // route only "upgrades" once someone actually edits and saves it. Stops from the very first
+    // above (details ~= note). Neither is migrated — normalizeRoute(route) is the one place that
+    // understands all three shapes and reconstructs the equivalent {places, interstops} view (with
+    // interstops[i] always a plain options array in the returned view, regardless of which shape
+    // the saved data was actually in) on the fly; every renderer and the editor read a route through
+    // it rather than touching stops/interstops directly. Saving through the editor always writes the
+    // newest shape, so an old route only "upgrades" once someone actually edits and saves it. Stops from the very first
     // version of AI route generation (before even the `type` field existed) only ever have
     // {placeId, travel} — read defensively via stop.type || (stop.placeId ? "place" : "break").
     days: [
@@ -828,9 +851,12 @@ category filter over the trip's own saved places, browser geolocation) plus, now
 free-text query (`np-ai-query`/`np-ai-ask`) alongside it — reuses `AI_PLACE_SCHEMA_DOC` and
 `sanitizePlaceItem()` (same "what's a valid place" definition as everywhere else) to get back a
 JSON array of suggestions near `npReferencePoint`, rendered as their own "✨ AI suggestions" section
-below the saved-places results, distinct border color, clearly labeled "not yet saved to this trip."
-Same no-grounding caveat as AI Verify/"Tell me more": the model can't do a live search, so the
-prompt explicitly tells it to leave out anything it isn't genuinely confident exists at that
+**above** the saved-places results (revised from below — a fresh AI query is usually the more
+immediately relevant result when someone bothered to type one, so it shouldn't require scrolling
+past the whole saved-places list first; a "Saved places nearby" divider line now separates the two
+sections when both are present), distinct border color, clearly labeled "not yet saved to this
+trip." Same no-grounding caveat as AI Verify/"Tell me more": the model can't do a live search, so
+the prompt explicitly tells it to leave out anything it isn't genuinely confident exists at that
 location rather than guessing, and the dialog's hint text sets that expectation up front.
 
 **How a chosen suggestion becomes a real `places[]` entry** (the open question from the original
@@ -912,6 +938,135 @@ already uses for a missing amount).
    doesn't lose progress. A "your drafts" list reads pending drafts out of localStorage.
 5. Explicit "Save trip" promotes the draft into real `trips` / `tripData` / `tripNotes` documents
    in Firestore. Only at this point does it become visible to other participants.
+
+## Auto-generate trip wizard
+
+✅ **Implemented** — a "✨ Auto-generate places & routes…" button on the Overview tab
+(`#autogen-modal`), plus an automatic prompt right after creating a brand-new trip (not "Copy this
+trip" — see below): generates places, then routes, for every one of the trip's cities in one
+sequential run and writes them straight to the live trip, with no manual review checklist at any
+step. This is deliberately a different trade-off than every other AI-generation entry point in the
+app (which all end at a review checklist before anything is written) — the whole point here is "get
+a trip off the ground fast," so double-checking afterward (starting with "📍 Check coordinates" in
+the Places tab) is expected, not a gap. **Requires Tier 3** (direct AI calls) — there's no human in
+the loop for a paste-back step, so there's no Tier 2 fallback for this specific flow; the setup
+screen says as much and points at the regular "✨ Generate with AI" buttons instead if Tier 3 isn't
+configured.
+
+**Setup screen**: lists the trip's cities (read-only — add them via "Edit trip details" first if
+there are none, a hint explains this and disables Start), places-per-city count, routes-per-city
+count (0 = places only), an optional **places-per-route** count (`#autogen-stops-per-route` — same
+field/fallback pattern as the Routes tab's own "Target stops per route": empty falls back to
+`tripData.meta.preferences.stopsPerRoute`, then to 5 — read by both the algorithm path and the AI
+prompt, not AI-only), and a method toggle for route generation — **🧮 Algorithm** (the existing
+`generateRoutesByAlgorithm()`, instant, no AI) or **✨ AI** (a new prompt, see below), same choice
+already offered on the Routes tab's own "Generate routes" modal. Two free-text **"Additional
+instructions"** boxes mirror the "Notes specific to this batch only" convention `buildAiInstruction()`/
+`buildRoutesInstruction()` already use: one for places (always shown, threaded into
+`buildAutogenPlacesPrompt()`) and one for routes (`#autogen-routes-notes-field`, only shown when
+**✨ AI** is the selected route method — the algorithm doesn't read free text at all, so showing it
+under Algorithm would be a control that visibly does nothing).
+
+**Per city, sequentially**: calls `generateAiContent` with a new `buildAutogenPlacesPrompt(city,
+count, notes)` — reuses `AI_PLACE_SCHEMA_DOC` (the same schema doc the manual Places-AI-generation
+modal sends) and pulls preferences directly from `tripData.meta.preferences` rather than a
+batch-edit form, since this wizard has no per-batch preferences screen (the free-text notes box
+above is the one exception — it's read from the setup screen itself, same as the manual modals'
+own batch-notes field); also tells the AI not to re-suggest any place already on the trip. The
+response is parsed by a new `parseAiPlacesJson()` (same `sanitizePlaceItem()` validator every other
+place-import path uses) and written to `tripData.places` in **one batched write per city**, not one
+write per place. If routes were requested, either `generateRoutesByAlgorithm()` runs synchronously
+(passed the setup screen's places-per-route value), or a new `buildAutogenRoutesPrompt(city, count,
+stopsPerRoute, notes)` prompt (reusing `getEligiblePlacesForRoutes()`, `findBasePlace()`, and the
+already-parameterized `routesTravelSchemaDoc()`) is sent and parsed via the now-DOM-independent
+`parseRoutesJson(text, city)` — extracted from the Routes modal's own `validateRoutesResponse()`
+specifically so this wizard and the manual modal share one definition of "what a valid route
+response looks like" rather than a second copy. Routes are written in their own batched per-city
+write, after that city's places write has already landed (so AI-generated routes can reference the
+just-added places' real ids). One city failing (a Gemini error, a parse error) logs an inline
+warning line and moves on to the next city rather than aborting the whole run — a partial result
+across the trip's other cities is strictly better than losing everything to one bad response.
+`trips/{tripId}.updatedAt` is bumped once at the very end, not per city.
+
+**Real layout bug, fixed**: the setup step's `.modal-actions` footer (`position:sticky; bottom:0`,
+same pattern documented under "Design system" → Modals) visibly overlapped the route-method chip
+row by a few pixels — reported as "the bottom bar is overlapping the route generation method
+options." Root cause was specific to this step: the step's content happened to size to *almost but
+not quite* the modal's height, so nothing ever actually overflowed/scrolled, yet the sticky
+footer's position still landed a few px into the row above it — normal margin collapsing between
+that row and `.modal-actions` didn't reliably prevent this the way it does in a modal that either
+overflows outright or has more natural whitespace before its own action bar. Fixed with an explicit
+block-level spacer (`<div style="height:28px;">`) between the route-method/routes-notes area and
+`.modal-actions`, which guarantees real layout height regardless of how the sticky/margin-collapse
+edge case behaves, plus a taller `.modal-box` cap for this modal specifically (`max-height:92vh`, up
+from the base 85vh) for more headroom generally.
+
+**Progress display, revised from the original "cool animation" idea**: the first version paced each
+place/route's reveal with an artificial `sleep(180)` between items purely for a fade-in visual
+effect. Cut after feedback that this should "focus on actual functionality" — a run should never
+take longer just to look nicer. The per-item delay is gone entirely; the loop now only yields a bare
+`sleep(0)` between appends (letting the browser paint the DOM update, not pacing anything), and
+progress is shown as a plain `<progress>` bar plus a `"Adding places for Copenhagen… (2/10) — 23%"`
+style status line, computed against a **planned** total (`cities.length * (placesPerCity +
+routesPerCity)`) — an estimate, not a promise, since the AI can return more/fewer items than asked
+or a city can fail and contribute 0; the bar is snapped to 100% on completion (or Stop) regardless,
+so it never gets stuck short. The list pane still shows each place/route as it's added (full detail
+via the existing `placeDetailHtml()`/`routeStopSequenceLine()`, auto-scrolling to the newest item)
+and the map pane drops a marker per place with coordinates — that part of the original idea was kept
+since it's genuinely useful confirmation of what's landing, not just decoration. A **"✨ Animate"
+checkbox** (`#autogen-animate-toggle`, off by default), togglable live mid-run, adds/removes a CSS
+class (`#autogen-list.animate`) that turns the entrance fade back on for whoever does want it — but
+it's wired as a pure CSS toggle, not a gate on the loop's `await`s, so checking it can never slow
+the actual generation down, addressing the same feedback directly rather than just hiding the
+feature.
+
+**Real problem found and fixed: routes silently came back empty.** AI place generation only
+includes a coordinate guess when the model is actually confident (`AI_PLACE_SCHEMA_DOC` tells it to
+omit `coords` otherwise), so a freshly-generated city routinely had few or zero places with
+coordinates — and `getEligiblePlacesForRoutes()` filters on exactly that, so route generation (both
+methods) had nothing to cluster/order and silently produced nothing for that city. The normal fix
+in this app is the "📍 Check coordinates" flow, but that's a one-place-at-a-time interactive review
+— exactly the kind of manual step this wizard exists to avoid, and not something the user wanted
+bolted onto an "automated" flow. **`autoGeocodeCityPlaces(city, onProgress)`** is the headless
+answer: right before route generation for a city (only when `routesPerCity > 0` — a places-only run
+has no reason to pay this cost), it reuses the interactive fixer's own `geocodePlace()` (Nominatim,
+name+city+area with an area-dropped retry, same ~1 req/sec pacing as `startCoordsFixer()`'s
+background loop) against every place in that city still needing a check (`coordsNeedsCheck()` —
+no `coords` at all, or `coordsSource:"ai"`), and writes back whatever it finds in **one batched
+write**, same pattern as everywhere else in this wizard. Deliberately simpler than the interactive
+fixer's own decision logic: there's no one here to review a comparison against, so a found result is
+always taken outright (`coordsSource:"osm"`) rather than only auto-confirming when there's no prior
+guess or the two are within `COORDS_AUTO_CONFIRM_THRESHOLD_M` — for this flow, a real geocoded
+position is trusted over an LLM's guess unconditionally. A place Nominatim can't find at all is left
+as-is (still added to the trip, just excluded from that city's routes, same as any place with no
+coordinates) — logged as a one-line summary ("📍 Copenhagen: found coordinates for 8/10 place(s)
+that needed checking") rather than silently dropped. If *every* place in a city fails to geocode,
+route generation for that city just logs its usual "not enough places with coordinates" warning and
+moves on — same graceful-degradation behavior as any other per-city failure, not a crash. The
+progress bar's planned-total estimate accounts for this extra phase (adds up to `placesPerCity` more
+steps per city when routes are requested), and the status line shows "Checking coordinates for
+Copenhagen… (3/10)" while it runs so the extra time isn't unexplained. Verified with a mocked
+`geocodePlace()`: partial success (route correctly built from only the geocoded places, the
+ungeocodable one excluded), total failure (graceful warning, no crash), and Stop mid-geocoding
+(halts cleanly, no route generated, nothing left inconsistent).
+
+**"Stop"** sets a flag checked at each loop boundary (after every AI call and after every
+place/route append) — an in-flight network call still finishes, but nothing past that point gets
+added or written, so a stopped run never leaves a half-written city inconsistent with what's shown
+in the list. **"Done"** just closes the modal; nothing further happens automatically (see below).
+
+**Entry points**: (1) the Overview tab button (`btn-autogen-trip`, next to "Edit trip details"),
+open to running against an already-populated trip same as any other generation tool; (2) automatically
+right after `saveTripDetails()` creates a genuinely **new** trip (not `tripModalMode === 'copy'`,
+which already seeds its own places/routes from the source trip — offering to generate more on top of
+a copy isn't the same "get started" moment a blank trip is) — opens `openAutogenModal()` immediately
+after `loadTrip(slug)` resolves, only if the new trip actually has cities set.
+
+**Deliberately not done**: no auto-triggered `startCoordsFixer()` afterward (that's an interactive,
+one-place-at-a-time review flow that doesn't fit a hands-off wizard — the end-of-run summary just
+tells the user to run it manually) and no live/streaming reveal (Gemini's `generateContent` endpoint
+here isn't a streaming call — the "watching it happen" pacing is a UI-side illusion over an already-
+complete response, not literal progress from the API).
 
 ## Routing / planning (Phase 4) — current thinking, not locked
 
@@ -1027,22 +1182,61 @@ Places tab already owns that, but a place with no thumbnail yet still gets a sam
 some places have a photo — an actual gap here, not a blank space, was the original behavior and it
 misaligned every text line next to a photo-less row) next to each stop card's name, per-stop
 planning note and an editable approximate stay
-duration (minutes) for each place, up/down buttons to reorder (not drag-and-drop — simpler and
-reliable on touch) and a remove button per stop. Editing state mirrors
+duration (minutes) for each place, **every link the place has** (`Map ↗`, every non-thumbnail
+`links[]` entry, and any related documents — the exact same links row `placeDetailHtml()` renders
+everywhere else in the app, reused here rather than duplicated, so they're openable without leaving
+the editor to go look the place up elsewhere first), up/down buttons to reorder (not drag-and-drop —
+simpler and reliable on touch) and a remove button per stop. Editing state mirrors
 the normalized `{places, interstops}` view directly (`routeEditorPlaces`/`routeEditorInterstops`,
 populated via `normalizeRoute()` when opening an existing route) rather than the old flat
 stops-with-interleaved-breaks array. A live map on the right shows the draft route's numbered
 place stops (see below) and updates on every structural change (add/remove/reorder) — no separate
-refresh step. Opening the editor collapses any currently-expanded route card first, since the
-editor's own map replaces the need for that one to stay open (also avoids two live Leaflet
-instances of the same route disagreeing with each other). No validation beyond requiring a label —
-unlike the AI paste-back path this is direct hand-editing, not untrusted external input, so
+refresh step. **Bidirectional list↔map focus** (`focusRouteEditorMapOnStop()`/
+`focusRouteEditorListOnStop()`) — added because this editor's own map had never gotten the same
+click-to-focus wiring every other split list+map view in the app already has (Places tab, the
+expanded route card, Day-by-day): clicking a stop card (anywhere except a button/link/input inside
+it) pans the map to that stop's marker and opens its popup; clicking a marker scrolls to and briefly
+highlights (`.route-stop-row.highlighted`, same class/timing the expanded view's version already
+uses) the matching stop card. Opening the editor collapses any currently-expanded route card first,
+since the editor's own map replaces the need for that one to stay open (also avoids two live
+Leaflet instances of the same route disagreeing with each other). No validation beyond requiring a
+label — unlike the AI paste-back path this is direct hand-editing, not untrusted external input, so
 there's nothing to reject. Saving always sets `edited:true` and recomputes `totalWantRating`;
 `generatedBy` is set to `"manual"` for brand-new routes and left untouched when editing an
 AI-generated one — editing doesn't erase where a route came from. This dialog is the intended
 eventual home for an in-app clustering algorithm too (the "generate roughly N routes" decision
 below) — not built yet, v1 still has none, but the editor was built so a future "auto-arrange"
 action has somewhere to live without restructuring the UI.
+
+✅ **Insert a place after any stop, not just at the end** — revised from the original design, where
+the search box (basic or advanced) always appended to the route's actual last stop; the only way to
+put a place between two existing stops was to add it at the end and drag it up with ↑/↓. The same
+combined search-input-plus-"🔍 Advanced"-button control (`routeInsertWidgetHtml()`) now renders
+after *every* stop (labeled "+ Add a place here" so it doesn't read as a travel-editing control),
+so "insert between stop 2 and 3" is just using the widget that's already sitting right there — no
+extra buttons, no dropdown of positions to choose from, and the case that used to be the only option
+(append at the end) is still exactly the last widget in the list, unchanged. On a still-empty route
+there's nothing to render after, so a single instance renders alone (`insertAt: 0`).
+`insertRouteEditorPlace(placeId, insertAt)` is the one function both the inline search and the
+advanced modal funnel through: inserting strictly between two existing stops splits the gap that
+used to connect them into two new empty gaps (their combined travel data can't describe either half
+on its own) — snapshotted to the interstop cache first via `cacheGapBeforeClear()`, the exact same
+"don't just lose it" mechanism reordering/removing a stop already uses, so splitting a gap doesn't
+throw away a manually-entered travel option any more than reordering does. Inserting at either end
+of the route only needs one new empty gap; inserting into an empty route needs none. Because
+`#route-editor-stops` gets fully rebuilt on any structural change, these per-stop search
+inputs/results lists are handled via **delegated** listeners on the container (same pattern every
+other route-editor control already uses) rather than one listener per box — `focus` doesn't bubble,
+so that specific delegation needed a capturing listener (`addEventListener('focus', fn, true)`).
+Only one insert-results dropdown is ever open at a time (focusing a different box, or a structural
+re-render, hides any other open one) so multiple "+ Add a place here" widgets on a long route don't
+all show open dropdowns simultaneously. The scoring/sorting reference point (see "Weighted
+proximity+variety sort" below) is whichever stop sits immediately before the clicked widget's
+`insertAt`, not always the route's last stop — the advanced modal's "reference" banner (still
+labeled "Last stop in route" in earlier versions of this doc) now reads "Adding after" plus that
+stop's name for the same reason. Picking several places at once in the advanced modal inserts them
+contiguously starting at `insertAt`, in stable city-array order, right after the reference stop —
+not reversed, and not scattered to wherever each individual insert would have landed on its own.
 
 ✅ **Weighted proximity+variety sort** for the add-place search: raw distance sort put a
 same-category place right next door ahead of a more useful, more varied option a little further
@@ -1068,8 +1262,9 @@ sorting last despite being nearest; and, at one shared band, an already-added ca
 behind both a same-category-not-added and a different-category-not-added candidate at similar
 distance.
 
-✅ **Advanced search dialog** (`#route-search-modal`, opened via a "🔍 Advanced search" button next
-to the inline search): a Places-tab-style split list+map for picking several places at once, with
+✅ **Advanced search dialog** (`#route-search-modal`, opened via the "🔍 Advanced" button that's part
+of every "+ Add a place here" widget — see above): a Places-tab-style split list+map for picking
+several places at once, with
 more context than the inline search's one-line-per-result affords. Each list row shows the same
 full place detail as Day-by-day (`placeDetailHtml()`, see "Day-by-day tab" below — thumbnail, want
 rating, badges, price/hours, categories, note, wishlist, and *every* link, not just Map) plus its
@@ -1158,9 +1353,68 @@ distance/time/cost silently attached to a leg that no longer exists — up-swap 
 `places[i]` clears gaps `[i-2,i-1,i]`; down-swap of `places[i]`/`places[i+1]` clears gaps
 `[i-1,i,i+1]`; removing the first place drops gap `0`; removing the last place drops the
 now-final gap; removing a middle place merges its two adjacent gaps into one empty gap
-(`interstops.splice(i-1, 2, [])`) rather than guessing which of the two survives. The field goes
-blank instead of showing a wrong number, prompting re-entry — recomputing a correct value
-automatically instead of just clearing it is still not built (see the deferred note below).
+(`interstops.splice(i-1, 2, [])`) rather than guessing which of the two survives. **Revised**: the
+field no longer just goes blank waiting for re-entry — see the interstop cache immediately below,
+which silently restores the same data if the same two places end up adjacent again. Recomputing a
+correct value automatically via a live ORS call on every reorder is still not built (see the
+deferred note below) — the cache is a different, cheaper answer to a related complaint.
+
+✅ **Multiple travel options per gap**: a gap can hold more than one alternative way to get between
+its two stops (e.g. "metro then a short walk" vs. "one direct bus") — added because manual entry
+kept losing this: only one travel method could ever be recorded per gap, with no way to note "or
+you could just take the bus instead." See the schema's `interstops[i].options[]` above for the full
+shape — each option has a `name` (optional, e.g. "Metro + walk") and its own `items` list, same
+per-step fields interstops always had (type/time/distance/cost/note). In the editor, each gap shows
+every option as its own card (name field, its steps, a "+ Add step" button, "Remove option") below a
+persistent "+ Add another way (option)" button — the first option is created by that same button,
+pre-seeded with one starter step so there's immediately something to edit, same one-click
+convenience the old single-option "+ Add travel or break" button had. **There's deliberately no
+"primary"/"selected" option** — every option is shown wherever a gap is displayed (each on its own
+"↓ " line via `interstopGapLinesHtml()`, shared by the route card, expanded view, share view, and
+both Day-by-day levels), and a route's total time (`computeRouteTotalTime()`) is a **min–max range**
+across whichever options have numbers entered rather than picking one to trust — e.g. a 2.3km/15min
+walk-then-metro option alongside a 2.5km/13min bus option shows as "2.3–2.5 km, 13–15 min" for that
+gap, and the route-level "Total time" line becomes a range too once any gap contributes one. A
+single-option gap (still the common case, and everything migrated from before this existed) just
+has `min === max`, shown as one plain number — `formatMinutesRange()`/`formatDistanceRange()`/
+`formatTimeRange()` all collapse to a single value rather than a dash when there's nothing to
+range over. Each option's own combined distance/time (`computeOptionTotals()`) is shown next to it
+— a live, visual-only sum of that option's steps, recomputed on every field change
+(`updateGapTotalsDisplay()`, called without a full re-render so typing doesn't lose focus/cursor
+position, same reasoning the rest of this form already follows) and **never itself stored** —
+storing a derived total invites it silently drifting out of sync with the steps actually entered.
+
+✅ **Remembers manually-entered options per place-pair, across reorders and across routes**
+(`saveInterstopCache()`/`loadInterstopCache()`/`maybeRestoreGapFromCache()`) — the concrete
+complaint this solves: enter a travel option between A and B, reorder the route to A→C→B (clearing
+that gap, per the reordering behavior above), then reorder back to A→B, and the same options
+reappear automatically rather than needing to be retyped. A plain `localStorage` cache, deliberately
+**not** Firestore-backed — judged not worth the sync complexity for what's a convenience, not trip
+data — keyed `interstopCache:{tripId}:{fromPlaceId}>{toPlaceId}`, directional the same way
+`orsLegCache` already is (a real street between two places isn't necessarily symmetric) and scoped
+per trip so switching trips can't leak one trip's legs into another's place-id namespace. Written on
+every edit to a gap's options (`syncGapCache()` — add/remove/rename/step edits all funnel through
+it) so it always reflects the latest state, including writing "nothing" when a gap is cleared back
+to empty (clears the stale cache entry rather than letting it resurrect data the user just
+deliberately removed). Read two ways: `cacheGapBeforeClear()` snapshots a gap's current data right
+before a reorder/removal would otherwise discard it via `clearGapAt()` (called against the *old*
+places array, before the swap — by the time `clearGapAt()` itself runs the places have already
+moved, so the snapshot has to happen first); `maybeRestoreGapFromCache()` runs at the top of each
+gap's render and silently backfills it from the cache if it's currently empty and these exact two
+places have a remembered pairing — idempotent, so it's a no-op on every render after the first.
+Not scoped to the current route — building a *different* route between two places used together
+before picks up the same cached options too, which is intentional (the real-world travel between
+two fixed points doesn't depend on which route happens to visit them).
+
+✅ **"🗺️ Get directions in Google Maps" link, per gap**: there's no routing API call behind this
+(ORS gives numbers, not turn-by-turn transit directions — see the OpenRouteService section below)
+— it's a plain link built from both stops' own coordinates,
+`https://www.google.com/maps/dir/{lat1},{lng1}/{lat2},{lng2}` (Google's directions URL accepts a raw
+`"lat,lng"` pair as either endpoint, no place name resolution or API key needed), shown whenever
+both stops have coordinates. Opens Google's real walking/transit/driving options in a new tab so the
+user can read off the actual numbers and type them into the option/step fields by hand — a
+deliberately manual bridge, not an integration, since there's no free API offering the equivalent
+turn-by-turn transit comparison Google's own UI shows.
 
 ✅ **Expandable route view**: an "Expand ▾"/"Collapse ▴" button per route card **replaces** that
 card's compact summary (total want rating, the stop-sequence line) with a Places-tab-style split
@@ -1239,11 +1493,16 @@ route); if every pair a profile needs is already cached, `calculateRouteTravel()
 call for that profile entirely. Not persisted — the real source of truth after a Save is whatever
 ends up written into the route's own `interstops`, same as any other editor field.
 
-**Per-gap behavior**: an existing interstop item whose `type` maps to a profile gets recalculated
-onto that same item (`time`/`distance` overwritten, `cost`/`note` left untouched — ORS has no notion
-of cost); a completely empty gap gets exactly one *new* item created using
-`defaultOrsLegType()` (the trip's preferred travel methods if any map to a profile, else `'walk'`);
-a gap whose only item(s) are breaks/transit/custom types is left alone entirely, and a gap missing
+**Per-gap behavior, revised for multiple options per gap** (see "Routing / planning" → "Multiple
+travel options per gap" above): every option in a gap is checked independently, since there's no
+"primary" option to single out — each option's own first item whose `type` maps to a profile gets
+recalculated onto that same item (`time`/`distance` overwritten, `cost`/`note` left untouched — ORS
+has no notion of cost); an option with only breaks/transit/custom items is left alone. A gap with no
+options at all — or options that exist but hold zero items between them — gets exactly one *new*
+option+item created using `defaultOrsLegType()` (the trip's preferred travel methods if any map to a
+profile, else `'walk'`). Multiple options in one gap needing the same profile still cost only one
+Matrix API call (calls are batched by distinct profile across the whole route, not per option — see
+below), since it's the same physical leg regardless of how many options reference it. A gap missing
 coordinates on either endpoint is skipped and counted separately (`missingCoords`) rather than
 silently ignored — the status line reports updated/skipped/missing-coords counts after every run so
 none of that is invisible.
@@ -2022,6 +2281,9 @@ multi-tab support alongside it, since both people may have the app open in more 
 - ✅ "AI Verify" on the place edit modal: reviews the form's current values, shows a field-by-field
   diff against the AI's suggestions, lets the user selectively apply corrections into the form
   (never saves directly) — see "AI generation model" → "AI Verify"
+- ✅ Auto-generate trip wizard: "✨ Auto-generate places & routes…" (Overview tab, plus an automatic
+  prompt right after creating a brand-new trip) generates places then routes for every trip city in
+  one run, writing straight to the trip with no review checklist — see "Auto-generate trip wizard"
 - ✅ Place source tracking (AI vs user, see places[].source above), filterable
 - ✅ "Edit trip details" (Overview tab): editable dates/cities/currency after creation (fixes AI
   generation being stuck with no city to pick if none was set at New Trip time) plus the full
